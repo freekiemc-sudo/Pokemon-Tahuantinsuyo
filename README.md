@@ -25,3 +25,7 @@ Reporta bugs aquí: https://docs.google.com/forms/d/e/1FAIpQLSdU0T65pRXCy-Bh0Xaw
 ## Estado
 
 En desarrollo activo. Feedback bienvenido.
+<img width="795" height="597" alt="Captura de pantalla 2026-10-18 130730" src="https://github.com/user-attachments/assets/c97e1584-9b70-46db-89d3-11e146a90ee9" />
+
+<img width="802" height="602" alt="Captura de pantalla 2026-10-18 130754" src="https://github.com/user-attachments/assets/5af1d2fa-14d0-4a5b-b061-fde81d64b42d" />
+<img width="803" height="565" alt="Captura de pantalla 2026-10-18 130844" src="https://github.com/user-attachments/assets/8b8b4174-6d3d-49a3-acc6-9a7c090a3513" />
