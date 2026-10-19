@@ -29,3 +29,6 @@ En desarrollo activo. Feedback bienvenido.
 
 <img width="802" height="602" alt="Captura de pantalla 2026-10-18 130754" src="https://github.com/user-attachments/assets/5af1d2fa-14d0-4a5b-b061-fde81d64b42d" />
 <img width="803" height="565" alt="Captura de pantalla 2026-10-18 130844" src="https://github.com/user-attachments/assets/8b8b4174-6d3d-49a3-acc6-9a7c090a3513" />
+<img width="1260" height="604" alt="Animation" src="https://github.com/user-attachments/assets/e97b1c68-3d9b-4dd8-a554-6281472aae96" />
+<img width="1260" height="604" alt="Animation" src="https://github.com/user-attachments/assets/6bd0acbc-d69c-4b6b-a37e-eae6933023e6" />
+<img width="1260" height="604" alt="Animation" src="https://github.com/user-attachments/assets/aa16e23c-8f1c-4cb7-ae92-005f110e2c0a" />
