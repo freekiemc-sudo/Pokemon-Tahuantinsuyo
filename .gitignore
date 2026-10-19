@@ -1,0 +1,16 @@
+﻿__pycache__/
+*.pyc
+*.pyo
+.vscode/
+.idea/
+guardados/save_*.json
+*.log
+*.tmp
+_backup_manual_*/
+_backup_mega/
+proyecto_completo.txt
+fix_bugs*.py
+generar.py
+juntar_codigo.py
+full_overhaul.py
+f_episodio_amaru.py

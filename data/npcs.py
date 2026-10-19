@@ -1,0 +1,486 @@
+# data/npcs.py
+# -*- coding: utf-8 -*-
+"""NPCs unicos por ciudad con dialogos dinamicos segun medallas."""
+try:
+    from data.pokedex import POKEDEX_COMPLETA
+except Exception:
+    POKEDEX_COMPLETA = {}
+
+
+class NPC:
+    def __init__(self, nombre, mapa, pos, dialogos, dialecto="andino", rol="civil"):
+        self.nombre = nombre
+        self.mapa = mapa
+        self.pos = pos
+        # dialogos: dict {0: [...], 1: [...], 2: [...]} segun medallas
+        self.dialogos = dialogos
+        self.dialecto = dialecto  # andino, costeno, selva, capital
+        self.rol = rol
+        self.conversaciones = 0
+
+    def obtener_dialogo(self, medallas=0):
+        """Devuelve el dialogo segun la cantidad de medallas."""
+        niveles = sorted(self.dialogos.keys(), reverse=True)
+        for n in niveles:
+            if medallas >= n:
+                return self.dialogos[n]
+        return self.dialogos.get(0, ["Hola, viajero."])
+
+
+def _d(d0, d1=None, d2=None, d4=None, d6=None, d8=None):
+    """Helper para crear el dict de dialogos por medallas."""
+    out = {0: d0}
+    if d1: out[1] = d1
+    if d2: out[2] = d2
+    if d4: out[4] = d4
+    if d6: out[6] = d6
+    if d8: out[8] = d8
+    return out
+
+
+NPCS_DEFINIDOS = [
+    # ==================== CALETA NORTE ====================
+    NPC("Abuela Pancha", "caleta_norte", (12, 10),
+        _d(
+            ["Hola hijito. Cuidate en tu viaje.",
+             "Aqui en la caleta siempre hay trabajo."],
+            ["Ya tienes tu primera medalla! Que orgullo.",
+             "La abuela reza por ti cada noche."],
+            ["Tres medallas ya? Eres la envidia del pueblo!"],
+            ["Escuche que el Team Supay anda por la sierra...",
+             "Ten cuidado, hijito."],
+        ), "costeno", "anciana"),
+
+    NPC("Pescador Chalaco", "caleta_norte", (22, 18),
+        _d(
+            ["Los mejores pescados estan al amanecer.",
+             "El mar de Grau es generoso con los humildes."],
+            ["Ah, ya tienes medalla. Eso te da respeto.",
+             "Los Surito de por aqui son mansos."],
+            ["Con esa Medalla Arcilla ya puedes pescar Pirañas.",
+             "Traen suerte, dicen."],
+        ), "costeno", "pescador"),
+
+    NPC("Nino Mateo", "caleta_norte", (30, 20),
+        _d(
+            ["Cuando sea grande sere entrenador!",
+             "Como tu, causa!"],
+            ["Viste? Ya gane mi primera pelea!",
+             "Aunque mi mama me dio con la chancleta."],
+            ["Ese Team Supay me da miedo...",
+             "Pero tu los vas a vencer, no?"],
+        ), "costeno", "nino"),
+
+    # ==================== CIUDAD MOCHE ====================
+    NPC("Arqueologo Dr. Huaca", "ciudad_moche", (14, 8),
+        _d(
+            ["Estudio los huacos de la cultura Moche.",
+             "Sabias que el Senor de Sipan era de aqui?"],
+            ["La Medalla Arcilla es un simbolo ancestral.",
+             "Los moches la usaban en sus rituales."],
+            ["Vengo del Museo Larco de Lima.",
+             "Estos Pokemon son un tesoro nacional."],
+        ), "costeno", "sabio"),
+
+    NPC("Vendedora de Alfajores", "ciudad_moche", (40, 15),
+        _d(
+            ["Alfajores fresquitos! 3 por una chaucha.",
+             "Los hago con la receta de mi abuela."],
+            ["Oye, campeon. Toma uno de yapa.",
+             "Endulzate antes del camino."],
+            ["Con esa medalla ya podes ir a la sierra.",
+             "Lleva abrigo que hace frio!"],
+        ), "costeno", "comerciante"),
+
+    NPC("Sacerdote Moche", "ciudad_moche", (50, 20),
+        _d(
+            ["Los Apus protegen a quienes respetan la tierra.",
+             "Respeta siempre a los Pokemon."],
+            ["Tu corazon es puro.",
+             "Sigue asi y los Apus te acompanaran."],
+            ["Veo en ti un gran destino.",
+             "Pero el camino sera duro."],
+            ["El Team Supay no entiende el equilibrio.",
+             "Debemos detenerlos."],
+        ), "costeno", "religioso"),
+
+    # ==================== PUERTO ANCON ====================
+    NPC("Capitana Marina", "puerto_ancon", (25, 20),
+        _d(
+            ["Este puerto es famoso por su pesca.",
+             "El mar de Grau es peligroso si no lo respetas."],
+            ["Ya tienes 2 medallas? Excelente!",
+             "El Capitan Chata esta orgulloso."],
+            ["Los pokemon marinos de aqui son unicos.",
+             "Navega con cuidado."],
+        ), "costeno", "oficial"),
+
+    NPC("Buzo Ancashino", "puerto_ancon", (45, 25),
+        _d(
+            ["Bajo 30 metros sin tanque.",
+             "Los Carachama son mis amigos."],
+            ["Un dia atrape una Carachama Shiny!",
+             "Pero se escapo... Ay!"],
+            ["Con tu nivel ya podes bucear conmigo.",
+             "Pero sin oxigeno, ah."],
+        ), "costeno", "aventurero"),
+
+    # ==================== ANDAHUAYLAS ====================
+    NPC("Tejedora Mama Rosa", "andahuaylas", (18, 22),
+        _d(
+            ["Tejo chompas de alpaca.",
+             "Cada hilo cuenta una historia."],
+            ["Ya tienes 3 medallas!",
+             "Mi abuela decia que 3 es numero sagrado."],
+            ["El Team Supay robo mis tejidos una vez.",
+             "Ahora los odio con toda mi alma."],
+        ), "andino", "artesana"),
+
+    NPC("Arriero Pancho", "andahuaylas", (35, 15),
+        _d(
+            ["Mis llamas llevan carga por toda la sierra.",
+             "Son mas fuertes que cualquier camion."],
+            ["Cuidado con los Pishtaco en los caminos.",
+             "Solo salen de noche."],
+            ["Has visto la ciudad imperial?",
+             "Es la mas hermosa del mundo."],
+        ), "andino", "arriero"),
+
+    NPC("Nino Musico", "andahuaylas", (48, 20),
+        _d(
+            ["Toco la quena desde los 5 anos.",
+             "La musica calma a los Pokemon."],
+            ["Los antiguos usaban la musica para entrenar.",
+             "Por eso la Medalla Danza es especial."],
+            ["Cuando sea grande sere Maestro de Danza.",
+             "Como Wayra!"],
+        ), "andino", "artista"),
+
+    # ==================== CIUDAD IMPERIAL ====================
+    NPC("Sabio Consejero", "ciudad_imperial", (15, 12),
+        _d(
+            ["Esta ciudad fue el centro del Tahuantinsuyo.",
+             "Los muros hablan si sabes escuchar."],
+            ["4 medallas ya? El camino es largo.",
+             "Pero tu corazon es firme."],
+            ["Veo en ti al futuro campeon.",
+             "Los Apus te miran con agrado."],
+            ["El Team Supay busca algo antiguo.",
+             "Algo que despertaria a los dioses."],
+        ), "andino", "sabio"),
+
+    NPC("Astrónomo Real", "ciudad_imperial", (30, 8),
+        _d(
+            ["Leo las estrellas desde el observatorio.",
+             "Los incas eran grandes astronomos."],
+            ["El Inti y la Killa rigen nuestros destinos.",
+             "Pero los Pokemon son mas misteriosos."],
+            ["La constelacion del Amaru es sagrada.",
+             "Nadie debe alterarla."],
+        ), "andino", "cientifico"),
+
+    NPC("Curandera Kallpa", "ciudad_imperial", (48, 25),
+        _d(
+            ["Uso hierbas medicinales con los Pokemon.",
+             "El Jarabe de Camu Camu cura todo."],
+            ["Tu equipo se ve sano.",
+             "Sigue cuidandolos asi."],
+            ["Los Pokemon enfermos me buscan.",
+             "Puedo ensenarte a curarlos mejor."],
+        ), "andino", "medica"),
+
+    # ==================== PUNO ====================
+    NPC("Barquero del Titicaca", "puno", (25, 28),
+        _d(
+            ["Llevo 30 anos cruzando el lago.",
+             "Los Uros son gente sabia."],
+            ["El lago tiene espiritus.",
+             "Los Yatiri saben hablarles."],
+            ["Ya tienes la Medalla Mistico?",
+             "Ahora el lago te reconoce."],
+        ), "andino", "barquero"),
+
+    NPC("Tejedora Uros", "puno", (35, 22),
+        _d(
+            ["Tejo totora como mi abuela.",
+             "Los Uros flotan en el tiempo."],
+            ["Los Aruy son espiritus de llamas.",
+             "Aparecen de noche."],
+            ["Tu equipo tiene aura mistica.",
+             "El lago te acepta."],
+        ), "andino", "artesana"),
+
+    # ==================== HUARAZ ====================
+    NPC("Montanista Aleman", "huaraz", (20, 20),
+        _d(
+            ["Vengo de Alemania a escalar el Huascaran.",
+             "Es el nevado mas hermoso del mundo."],
+            ["Tu equipo tiene espiritu de montana.",
+             "Sigue asi, joven."],
+            ["Con 6 medallas ya eres un veterano.",
+             "Respeto, amigo."],
+        ), "andino", "extranjero"),
+
+    NPC("Guardaparques Wilfredo", "huaraz", (45, 15),
+        _d(
+            ["Cuido el Parque Nacional Huascaran.",
+             "Los Ursandino estan en peligro."],
+            ["El Team Supay contamina los glaciares.",
+             "Debemos detenerlos."],
+            ["Gracias por ayudar con los Pokemon.",
+             "Eres un aliado del parque."],
+        ), "andino", "guardaparques"),
+
+    # ==================== PUERTO SELVA ====================
+    NPC("Shaman Amazonico", "puerto_selva", (20, 25),
+        _d(
+            ["La selva te habla si sabes escuchar.",
+             "Pero cuidado: no todo es amigable."],
+            ["Tienes 7 medallas? Los espiritus te respetan.",
+             "Eso es un gran honor."],
+            ["El Amaru vive en las profundidades.",
+             "Solo los dignos lo veran."],
+        ), "selva", "shaman"),
+
+    NPC("Nina Bilingue", "puerto_selva", (40, 22),
+        _d(
+            ["Hablo espanol y shipibo.",
+             "Mi abuela me ensena las plantas."],
+            ["Los Chullachaqui te confunden.",
+             "No sigas silbidos en la selva."],
+            ["Ya venciste al Dr. Osho?",
+             "Eres leyenda en el pueblo."],
+        ), "selva", "nina"),
+
+    NPC("Boticario Selvatico", "puerto_selva", (50, 25),
+        _d(
+            ["Vendo hierbas curativas del Amazonas.",
+             "Uña de gato, ayahuasca, sangre de grado."],
+            ["Tu equipo necesita vitaminas.",
+             "Toma estas hojas de coca."],
+            ["El Team Supay me robo plantas raras.",
+             "Los odio con toda mi alma."],
+        ), "selva", "comerciante"),
+
+    # ==================== CIUDAD CAPITAL ====================
+    NPC("Empresario Don Augusto", "ciudad_capital", (20, 15),
+        _d(
+            ["Bienvenido a la capital, joven.",
+             "Aqui todo se compra y se vende."],
+            ["Veo que tienes medallas.",
+             "Eso te abre muchas puertas."],
+            ["El Team Supay quiere mi empresa.",
+             "Pero no saben con quien se meten."],
+            ["Con 8 medallas eres la elite.",
+             "Invierte en mi empresa, te conviene."],
+        ), "capital", "empresario"),
+
+    NPC("Taxista Chalaco", "ciudad_capital", (35, 20),
+        _d(
+            ["Taxi! Taxi! A donde vas?",
+             "A la Liga? Te llevo por 20 soles."],
+            ["Los Limeños son especiales.",
+             "Pero los chalacos somos mas fuertes."],
+            ["Con esa pinta ya vas a la Liga?",
+             "Suerte, causa."],
+        ), "capital", "taxista"),
+
+    NPC("Abogada Defensora", "ciudad_capital", (50, 25),
+        _d(
+            ["Defiendo a los Pokemon maltratados.",
+             "El Team Supay tiene demandas por doquier."],
+            ["Tu equipo esta bien cuidado.",
+             "Se nota que los amas."],
+            ["Si atrapas al Team Supay,",
+             "tengo 50 cargos contra ellos."],
+        ), "capital", "abogada"),
+
+    NPC("Chica Fanguera", "ciudad_capital", (25, 30),
+        _d(
+            ["Voy al estadio a ver los partidos.",
+             "Alianza Lima o Universitario?"],
+            ["Mi primo entrena Pokemon.",
+             "Dice que el Amaru existe."],
+            ["Con tu nivel ya vas a la Liga.",
+             "Invita entradas cuando seas campeon!"],
+        ), "capital", "fanatica"),
+]
+
+
+def _acomodar_npcs_auto():
+    """Reubica los NPCs a la celda caminable mas cercana, EVITANDO puertas."""
+    try:
+        from sistemas.mapa_visual import (CAMINABLES, MapaVisual,
+                                            PUERTA, SIGN, SIGN_INFO, TECHO,
+                                            EDIFICIO, GIMNASIO_POS,
+                                            TAMBO_POS, TIENDA_POS)
+        cache_mapas = {}
+        # Posiciones de puertas importantes que NO se deben bloquear
+        posiciones_criticas = set()
+        for d in (GIMNASIO_POS, TAMBO_POS, TIENDA_POS):
+            for mapa_id, pos in d.items():
+                if isinstance(pos, tuple) and len(pos) == 2:
+                    posiciones_criticas.add((mapa_id, pos[0], pos[1]))
+                    # Tambien bloquear la celda de arriba y abajo
+                    for dy in (-1, 1):
+                        posiciones_criticas.add((mapa_id, pos[0], pos[1] + dy))
+
+        for npc in NPCS_DEFINIDOS:
+            try:
+                mapa_id = npc.mapa
+                if mapa_id not in cache_mapas:
+                    cache_mapas[mapa_id] = MapaVisual(mapa_id)
+                mv = cache_mapas[mapa_id]
+                x, y = npc.pos
+
+                # Verificar si esta en un lugar VALIDO
+                es_valido = False
+                if 0 <= x < mv.ancho and 0 <= y < mv.alto:
+                    tile_actual = mv.tiles[y][x]
+                    # Debe ser caminable Y no ser puerta/letrero
+                    if tile_actual in CAMINABLES and tile_actual not in (PUERTA, SIGN, SIGN_INFO):
+                        # No debe estar sobre una posicion critica
+                        if (mapa_id, x, y) not in posiciones_criticas:
+                            # Tampoco debe estar ADYACENTE a una puerta importante
+                            adyacente_critico = False
+                            for dy in (-1, 0, 1):
+                                for dx in (-1, 0, 1):
+                                    if (mapa_id, x + dx, y + dy) in posiciones_criticas:
+                                        adyacente_critico = True
+                                        break
+                                if adyacente_critico:
+                                    break
+                            if not adyacente_critico:
+                                es_valido = True
+
+                if es_valido:
+                    continue
+
+                # Buscar cerca
+                encontrado = False
+                for radio in range(1, 20):
+                    for dy in range(-radio, radio + 1):
+                        for dx in range(-radio, radio + 1):
+                            if max(abs(dx), abs(dy)) != radio:
+                                continue
+                            nx, ny = x + dx, y + dy
+                            if not (0 <= nx < mv.ancho and 0 <= ny < mv.alto):
+                                continue
+                            tile = mv.tiles[ny][nx]
+                            if tile not in CAMINABLES:
+                                continue
+                            if tile in (PUERTA, SIGN, SIGN_INFO):
+                                continue
+                            # No sobre posicion critica
+                            if (mapa_id, nx, ny) in posiciones_criticas:
+                                continue
+                            # No adyacente a posicion critica
+                            ady = False
+                            for ddy in (-1, 0, 1):
+                                for ddx in (-1, 0, 1):
+                                    if (mapa_id, nx + ddx, ny + ddy) in posiciones_criticas:
+                                        ady = True
+                                        break
+                                if ady:
+                                    break
+                            if ady:
+                                continue
+                            npc.pos = (nx, ny)
+                            encontrado = True
+                            break
+                        if encontrado:
+                            break
+                    if encontrado:
+                        break
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+_acomodar_npcs_auto()
+
+
+
+
+# === NPCS EXTRA F2 ===
+_npcs_extra = [
+    NPC("Vecino Curioso", "caleta_norte", (18, 22),
+        _d(["Buenos dias! A donde vas tan temprano?"],
+           ["Con esa medalla te respeta todo el barrio."]),
+        "costeno", "civil"),
+    NPC("Nina del Faro", "caleta_norte", (35, 15),
+        _d(["Mi papa es farero!", "Por las noches veo las estrellas desde arriba."]),
+        "costeno", "nina"),
+    NPC("Musico Callejero", "ciudad_moche", (22, 18),
+        _d(["Toco la guitarra por unas monedas.",
+           "La musica aleja a los Pokemon salvajes."]),
+        "costeno", "artista"),
+    NPC("Anciano de la Plaza", "ciudad_moche", (10, 15),
+        _d(["He visto imperios caer...",
+           "Tu generacion es mas fuerte que la mia."]),
+        "costeno", "anciano"),
+    NPC("Cocinero del Puerto", "puerto_ancon", (30, 22),
+        _d(["Preparo el mejor ceviche de la costa!",
+           "Quieres probarlo? Solo por hoy, gratis."]),
+        "costeno", "vendedor"),
+    NPC("Mendigo Sabio", "ciudad_imperial", (28, 22),
+        _d(["Psss... escucha...",
+           "El Amaru existe. Yo lo vi de nino.",
+           "Nadie me cree, pero es verdad."]),
+        "andino", "anciano"),
+    NPC("Nino del Chullo", "andahuaylas", (30, 12),
+        _d(["Mi mama me teje chullos!",
+           "Los rojos son los mas calentitos."]),
+        "andino", "nino"),
+    NPC("Bailarina Aymara", "puno", (20, 28),
+        _d(["Bailo desde los cinco anos.",
+           "El Titicaca es mi publico."]),
+        "andino", "danzante"),
+    NPC("Pescador Silencioso", "puno", (48, 25),
+        _d(["..."]),
+        "andino", "pescador"),
+    NPC("Guardaparque Joven", "huaraz", (30, 25),
+        _d(["Los Ursandino estan en peligro.",
+           "Ayudanos a protegerlos."]),
+        "andino", "guardia"),
+    NPC("Danzante Amazonico", "puerto_selva", (25, 28),
+        _d(["Bailo con los espiritus de la selva.",
+           "Solo en las noches de luna llena."]),
+        "selva", "danzante"),
+    NPC("Botanica Alemana", "puerto_selva", (48, 18),
+        _d(["Estudio las plantas medicinales.",
+           "He descubierto 12 nuevas especies."]),
+        "selva", "cientifica"),
+    NPC("Vendedor de Causa", "ciudad_capital", (28, 22),
+        _d(["Causa limeña! 5 soles!",
+           "Con papa amarilla, la mejor."]),
+        "capital", "vendedor"),
+    NPC("Guardia Presidencial", "ciudad_capital", (48, 20),
+        _d(["Alto! Zona restringida.",
+           "Oh, eres entrenador. Puedes pasar."]),
+        "capital", "guardia"),
+    NPC("DJ de la Costa", "ciudad_capital", (15, 22),
+        _d(["Pongo la musica en el mercado.",
+           "Salsa, cumbia, chicha! Todo suena aqui."]),
+        "capital", "artista"),
+]
+
+NPCS_DEFINIDOS.extend(_npcs_extra)
+
+print(f"OK NPCs extra: {len(_npcs_extra)} nuevos")
+
+# Version publica para el juego
+NPCS = []
+for _npc in NPCS_DEFINIDOS:
+    NPCS.append({
+        "nombre": _npc.nombre,
+        "mapa": _npc.mapa,
+        "pos": _npc.pos,
+        "rol": _npc.rol,
+        "dialogo": _npc.dialogos.get(0, ["Hola, viajero."]),
+        "obtener_dialogo": _npc.obtener_dialogo,
+    })
+
+
+print(f"OK data.npcs ({len(NPCS)} NPCs)")

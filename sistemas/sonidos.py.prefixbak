@@ -1,0 +1,562 @@
+"""
+Sonido procedural avanzado - efectos contextuales
+"""
+import pygame, math
+
+class Sonidos:
+    _habilitado = True
+    _cache = {}
+
+    @staticmethod
+    def init():
+        try:
+            if not pygame.mixer.get_init():
+                Sonidos._habilitado = False; return
+            import numpy  # noqa
+        except Exception:
+            Sonidos._habilitado = False
+
+    @staticmethod
+    def _tono(freq, dur=0.1, vol=0.3, forma="sin", freq_fin=None):
+        key = (freq, dur, vol, forma, freq_fin)
+        if key in Sonidos._cache: return Sonidos._cache[key]
+        if not Sonidos._habilitado: return None
+        try:
+            import numpy as np
+            sr = 22050
+            n = int(sr * dur)
+            t = np.linspace(0, dur, n, False)
+            f = np.full_like(t, freq) if freq_fin is None else np.linspace(freq, freq_fin, n)
+            fase = 2 * np.pi * np.cumsum(f) / sr
+            if forma == "sin":    onda = np.sin(fase)
+            elif forma == "square": onda = np.sign(np.sin(fase))
+            elif forma == "tri":
+                onda = 2 * np.abs(2 * ((fase / (2*np.pi)) % 1) - 1) - 1
+            elif forma == "noise": onda = np.random.uniform(-1, 1, n)
+            else: onda = np.sin(fase)
+            env = np.ones_like(t)
+            atk = min(int(sr * 0.005), n // 4)
+            rel = min(int(sr * 0.02), n // 4)
+            if atk > 0: env[:atk] = np.linspace(0, 1, atk)
+            if rel > 0: env[-rel:] = np.linspace(1, 0, rel)
+            onda = (onda * env * 32767 * vol).astype(np.int16)
+            snd = pygame.sndarray.make_sound(np.column_stack((onda, onda)))
+            Sonidos._cache[key] = snd
+            return snd
+        except Exception:
+            return None
+
+    @staticmethod
+    def _play(snd):
+        if snd: snd.play()
+
+    # --- Básicos ---
+    @staticmethod
+    def select():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(720, 0.04, 0.18, "square"))
+
+    @staticmethod
+    def confirmar():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(880, 0.05, 0.20, "square"))
+
+    @staticmethod
+    def cancelar():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(320, 0.08, 0.18, "square", 180))
+
+    @staticmethod
+    def bleep_texto():
+        if Sonidos._habilitado:
+            Sonidos._play(Sonidos._tono(900, 0.015, 0.08, "square"))
+
+    @staticmethod
+    def hover():
+        """Sonido al pasar por opcion."""
+        if Sonidos._habilitado:
+            Sonidos._play(Sonidos._tono(660, 0.02, 0.12, "square"))
+
+    @staticmethod
+    def seleccionar():
+        """Confirmar opcion."""
+        if Sonidos._habilitado:
+            Sonidos._play(Sonidos._tono(880, 0.05, 0.18, "square"))
+
+    @staticmethod
+    def cancelar():
+        if Sonidos._habilitado:
+            Sonidos._play(Sonidos._tono(400, 0.06, 0.16, "square", 260))
+
+    @staticmethod
+    def abrir_menu():
+        if Sonidos._habilitado:
+            try:
+                ch = pygame.mixer.Channel(5)
+                ch.stop()
+                for f in (523, 659, 784):
+                    s = Sonidos._tono(f, 0.04, 0.15, "square")
+                    if s: ch.queue(s)
+            except Exception:
+                pass
+
+    @staticmethod
+    def cerrar_menu():
+        if Sonidos._habilitado:
+            try:
+                ch = pygame.mixer.Channel(5)
+                ch.stop()
+                for f in (784, 659, 523):
+                    s = Sonidos._tono(f, 0.04, 0.15, "square")
+                    if s: ch.queue(s)
+            except Exception:
+                pass
+
+    @staticmethod
+    def subir_nivel():
+        if Sonidos._habilitado:
+            try:
+                ch = pygame.mixer.Channel(5)
+                ch.stop()
+                for f in (659, 784, 988, 1319):
+                    s = Sonidos._tono(f, 0.06, 0.20, "square")
+                    if s: ch.queue(s)
+            except Exception:
+                pass
+
+    @staticmethod
+    def medalla():
+        if Sonidos._habilitado:
+            try:
+                ch = pygame.mixer.Channel(5)
+                ch.stop()
+                for f in (523, 659, 784, 1046, 1318):
+                    s = Sonidos._tono(f, 0.08, 0.22, "square")
+                    if s: ch.queue(s)
+            except Exception:
+                pass
+
+    @staticmethod
+    def evolucionar():
+        if Sonidos._habilitado:
+            try:
+                import numpy as np
+                sr = 22050
+                dur = 2.0
+                n = int(sr * dur)
+                t = np.linspace(0, dur, n, False)
+                # Barrido hacia arriba
+                f = np.linspace(200, 1500, n)
+                fase = 2 * np.pi * np.cumsum(f) / sr
+                w = np.sin(fase) * 0.25
+                env = np.sin(np.linspace(0, np.pi, n))
+                w = (w * env * 32767).astype(np.int16)
+                snd = pygame.sndarray.make_sound(np.column_stack((w, w)))
+                ch = pygame.mixer.Channel(5)
+                ch.stop()
+                ch.play(snd)
+            except Exception:
+                pass
+
+    @staticmethod
+    def golpe_fuerte():
+        if Sonidos._habilitado:
+            try:
+                import numpy as np
+                sr = 22050
+                n = int(sr * 0.15)
+                t = np.linspace(0, 0.15, n, False)
+                w = np.random.uniform(-1, 1, n) * np.exp(-12 * t)
+                w += np.sin(2*np.pi*80*t) * np.exp(-8*t) * 0.5
+                w = (w * 32767 * 0.4).astype(np.int16)
+                snd = pygame.sndarray.make_sound(np.column_stack((w, w)))
+                snd.play()
+            except Exception:
+                pass
+
+    @staticmethod
+    def critico():
+        if Sonidos._habilitado:
+            try:
+                import numpy as np
+                sr = 22050
+                n = int(sr * 0.25)
+                t = np.linspace(0, 0.25, n, False)
+                w = np.random.uniform(-1, 1, n) * np.exp(-8 * t)
+                w += np.sin(2*np.pi*150*t) * np.exp(-6*t)
+                w += np.sin(2*np.pi*400*t) * np.exp(-10*t) * 0.5
+                w = (w * 32767 * 0.45).astype(np.int16)
+                snd = pygame.sndarray.make_sound(np.column_stack((w, w)))
+                ch = pygame.mixer.Channel(5)
+                ch.stop()
+                ch.play(snd)
+            except Exception:
+                pass
+
+    @staticmethod
+    def debilitar():
+        if Sonidos._habilitado:
+            try:
+                ch = pygame.mixer.Channel(5)
+                ch.stop()
+                for f in (523, 440, 349, 262):
+                    s = Sonidos._tono(f, 0.12, 0.18, "tri")
+                    if s: ch.queue(s)
+            except Exception:
+                pass
+
+    @staticmethod
+    def captura_exitosa():
+        if Sonidos._habilitado:
+            try:
+                ch = pygame.mixer.Channel(5)
+                ch.stop()
+                for f, d in [(659, 0.05), (659, 0.05), (784, 0.08),
+                             (988, 0.08), (1318, 0.15)]:
+                    s = Sonidos._tono(f, d, 0.20, "square")
+                    if s: ch.queue(s)
+            except Exception:
+                pass
+
+    @staticmethod
+    def pasos_hierba():
+        Sonidos.paso_hierba()
+
+
+    @staticmethod
+    def paso_pasto():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(120, 0.03, 0.05, "noise"))
+
+    @staticmethod
+    def paso_hierba():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(180, 0.05, 0.08, "noise"))
+
+    @staticmethod
+    def paso_tierra():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(80, 0.04, 0.06, "noise"))
+
+    # --- Ataques por tipo ---
+    @staticmethod
+    def ataque_fuego():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(180, 0.25, 0.28, "noise"))
+
+    @staticmethod
+    def ataque_agua():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(500, 0.20, 0.20, "sin", 200))
+
+    @staticmethod
+    def ataque_planta():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(300, 0.18, 0.22, "tri", 500))
+
+    @staticmethod
+    def ataque_normal():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(250, 0.10, 0.22, "square"))    @staticmethod
+    def ataque_por_tipo(tipo):
+        tabla = {
+            "Fuego":     Sonidos.ataque_fuego,
+            "Agua":      Sonidos.ataque_agua,
+            "Planta":    Sonidos.ataque_planta,
+            "Electrico": Sonidos.ataque_electrico,
+            "Eléctrico": Sonidos.ataque_electrico,
+            "Hielo":     Sonidos.ataque_hielo,
+            "Lucha":     Sonidos.ataque_lucha,
+            "Siniestro": Sonidos.ataque_siniestro,
+            "Fantasma":  Sonidos.ataque_fantasma,
+            "Veneno":    Sonidos.ataque_veneno,
+            "Tierra":    Sonidos.ataque_tierra,
+            "Roca":      Sonidos.ataque_roca,
+            "Acero":     Sonidos.ataque_acero,
+            "Psiquico":  Sonidos.ataque_psiquico,
+            "Psíquico":  Sonidos.ataque_psiquico,
+            "Bicho":     Sonidos.ataque_bicho,
+            "Volador":   Sonidos.ataque_volador,
+            "Dragon":    Sonidos.ataque_dragon,
+            "Dragón":    Sonidos.ataque_dragon,
+            "Hada":      Sonidos.ataque_hada,
+            "Sonido":    Sonidos.ataque_sonido,
+            "Normal":    Sonidos.ataque_normal,
+        }
+        fn = tabla.get(tipo, Sonidos.ataque_normal)
+        fn()
+
+    @staticmethod
+    def ataque_electrico():
+        # Crackle agudo tipo rayo
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(1400, 0.04, 0.22, "square")
+            s2 = Sonidos._tono(900, 0.05, 0.20, "square", 1800)
+            s3 = Sonidos._tono(2200, 0.06, 0.18, "square")
+            for s in (s1, s2, s3):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_hielo():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(2000, 0.08, 0.18, "sin", 900)
+            s2 = Sonidos._tono(1200, 0.10, 0.16, "sin", 600)
+            for s in (s1, s2):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_lucha():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s = Sonidos._tono(180, 0.12, 0.35, "noise")
+            s2 = Sonidos._tono(140, 0.08, 0.30, "square", 90)
+            for x in (s, s2):
+                if x: ch.queue(x)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_siniestro():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(220, 0.15, 0.22, "square", 130)
+            s2 = Sonidos._tono(160, 0.15, 0.24, "tri", 90)
+            for s in (s1, s2):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_fantasma():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(500, 0.18, 0.15, "sin", 1200)
+            s2 = Sonidos._tono(700, 0.20, 0.13, "sin", 300)
+            for s in (s1, s2):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_veneno():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(400, 0.08, 0.18, "sin", 300)
+            s2 = Sonidos._tono(500, 0.08, 0.18, "sin", 380)
+            s3 = Sonidos._tono(420, 0.10, 0.18, "sin", 320)
+            for s in (s1, s2, s3):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_tierra():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(70, 0.25, 0.32, "noise")
+            s2 = Sonidos._tono(90, 0.20, 0.26, "sin", 40)
+            for s in (s1, s2):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_roca():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(140, 0.06, 0.30, "noise")
+            s2 = Sonidos._tono(100, 0.18, 0.28, "square", 60)
+            s3 = Sonidos._tono(160, 0.05, 0.24, "noise")
+            for s in (s1, s2, s3):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_acero():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(1800, 0.06, 0.20, "square", 1200)
+            s2 = Sonidos._tono(1500, 0.10, 0.18, "sin", 900)
+            for s in (s1, s2):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_psiquico():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(900, 0.20, 0.18, "sin", 1800)
+            s2 = Sonidos._tono(1100, 0.15, 0.16, "sin", 700)
+            for s in (s1, s2):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_bicho():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            for i in range(5):
+                f = 700 + i * 80
+                s = Sonidos._tono(f, 0.03, 0.16, "square")
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_volador():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(800, 0.20, 0.14, "sin", 300)
+            s2 = Sonidos._tono(1200, 0.15, 0.12, "sin", 200)
+            for s in (s1, s2):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_dragon():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(200, 0.15, 0.26, "sin")
+            s2 = Sonidos._tono(180, 0.12, 0.24, "sin", 240)
+            s3 = Sonidos._tono(220, 0.15, 0.22, "sin", 90)
+            for s in (s1, s2, s3):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_hada():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            for f in (1046, 1318, 1568, 2093):
+                s = Sonidos._tono(f, 0.08, 0.15, "sin")
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_sonido():
+        if not Sonidos._habilitado: return
+        try:
+            ch = pygame.mixer.Channel(4)
+            ch.stop()
+            s1 = Sonidos._tono(600, 0.20, 0.20, "sin", 200)
+            s2 = Sonidos._tono(400, 0.25, 0.16, "sin", 150)
+            for s in (s1, s2):
+                if s: ch.queue(s)
+        except Exception:
+            pass
+
+    @staticmethod
+    def ataque_normal():
+        if Sonidos._habilitado:
+            Sonidos._play(Sonidos._tono(250, 0.10, 0.22, "square"))
+
+    @staticmethod
+    def ataque_por_tipo(tipo):
+        """Reproduce el sonido segun el tipo del movimiento."""
+        tabla = {
+            "Fuego":     Sonidos.ataque_fuego,
+            "Agua":      Sonidos.ataque_agua,
+            "Planta":    Sonidos.ataque_planta,
+            "Electrico": Sonidos.ataque_electrico,
+            "Eléctrico": Sonidos.ataque_electrico,
+            "Hielo":     Sonidos.ataque_hielo,
+            "Lucha":     Sonidos.ataque_lucha,
+            "Siniestro": Sonidos.ataque_siniestro,
+            "Fantasma":  Sonidos.ataque_fantasma,
+            "Veneno":    Sonidos.ataque_veneno,
+            "Tierra":    Sonidos.ataque_tierra,
+            "Roca":      Sonidos.ataque_roca,
+            "Acero":     Sonidos.ataque_acero,
+            "Psiquico":  Sonidos.ataque_psiquico,
+            "Psíquico":  Sonidos.ataque_psiquico,
+            "Bicho":     Sonidos.ataque_bicho,
+            "Volador":   Sonidos.ataque_volador,
+            "Dragon":    Sonidos.ataque_dragon,
+            "Dragón":    Sonidos.ataque_dragon,
+            "Hada":      Sonidos.ataque_hada,
+            "Sonido":    Sonidos.ataque_sonido,
+            "Normal":    Sonidos.ataque_normal,
+        }
+        fn = tabla.get(tipo, Sonidos.ataque_normal)
+        fn()
+
+    @staticmethod
+    def golpe():
+        if Sonidos._habilitado: Sonidos._play(Sonidos._tono(200, 0.06, 0.25, "noise"))
+
+    @staticmethod
+    def victoria():
+        if not Sonidos._habilitado:
+            return
+        try:
+            ch = pygame.mixer.Channel(5)
+            ch.stop()
+            notas = [(523, 0.14), (523, 0.07), (523, 0.07), (523, 0.20),
+                     (415, 0.20), (466, 0.20), (523, 0.40)]
+            for f, d in notas:
+                snd = Sonidos._tono(f, d, 0.20, "square")
+                if snd:
+                    ch.queue(snd)
+        except Exception:
+            pass
+
+    @staticmethod
+    def subir_nivel():
+        if not Sonidos._habilitado:
+            return
+        try:
+            ch = pygame.mixer.Channel(5)
+            ch.stop()
+            for f in (523, 659, 784, 1047):
+                snd = Sonidos._tono(f, 0.08, 0.18, "square")
+                if snd:
+                    ch.queue(snd)
+        except Exception:
+            pass
+
+    @staticmethod
+    def curacion():
+        if not Sonidos._habilitado:
+            return
+        try:
+            ch = pygame.mixer.Channel(5)
+            ch.stop()
+            for f in (523, 659, 784):
+                snd = Sonidos._tono(f, 0.08, 0.15, "sin")
+                if snd:
+                    ch.queue(snd)
+        except Exception:
+            pass
+
+
+Sonidos.init()

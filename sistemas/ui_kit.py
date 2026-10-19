@@ -1,0 +1,168 @@
+# sistemas/ui_kit.py
+# -*- coding: utf-8 -*-
+"""Kit de UI unificado estilo Emerald."""
+import pygame
+
+
+# Paleta Emerald GBA
+EMERALD_BG_DARK = (24, 20, 32)
+EMERALD_BG = (32, 28, 44)
+EMERALD_BG_LIGHT = (48, 42, 60)
+EMERALD_PANEL = (248, 240, 224)
+EMERALD_PANEL_DARK = (208, 200, 184)
+EMERALD_BORDER = (72, 60, 88)
+EMERALD_BORDER_LIGHT = (128, 112, 152)
+EMERALD_GOLD = (240, 200, 80)
+EMERALD_GOLD_LIGHT = (255, 240, 140)
+EMERALD_GOLD_DARK = (160, 120, 40)
+EMERALD_RED = (200, 60, 60)
+EMERALD_RED_DARK = (140, 30, 30)
+EMERALD_BLUE = (80, 130, 220)
+EMERALD_GREEN = (100, 200, 100)
+EMERALD_GREEN_DARK = (60, 140, 60)
+EMERALD_TEXT = (48, 40, 36)
+EMERALD_TEXT_LIGHT = (240, 236, 224)
+
+
+class UIKit:
+    """Kit unificado de widgets estilo Emerald."""
+
+    @staticmethod
+    def dibujar_panel(pantalla, x, y, w, h, doble_borde=True):
+        """Panel crema con bordes dorados estilo Emerald."""
+        # Sombra exterior
+        pygame.draw.rect(pantalla, (0, 0, 0, 80), (x - 2, y - 2, w + 6, h + 6))
+        # Borde oscuro exterior
+        pygame.draw.rect(pantalla, EMERALD_BORDER, (x - 4, y - 4, w + 8, h + 8))
+        # Borde dorado
+        pygame.draw.rect(pantalla, EMERALD_GOLD_DARK, (x - 3, y - 3, w + 6, h + 6))
+        pygame.draw.rect(pantalla, EMERALD_GOLD, (x - 2, y - 2, w + 4, h + 4), 2)
+        # Fondo crema
+        pygame.draw.rect(pantalla, EMERALD_PANEL, (x, y, w, h))
+        # Bisel interior claro
+        if doble_borde:
+            pygame.draw.rect(pantalla, EMERALD_PANEL_DARK, (x, y, w, h), 1)
+            pygame.draw.rect(pantalla, EMERALD_GOLD_LIGHT, (x + 1, y + 1, w - 2, h - 2), 1)
+
+    @staticmethod
+    def dibujar_panel_oscuro(pantalla, x, y, w, h, borde_color=EMERALD_GOLD):
+        """Panel oscuro tipo HUD."""
+        # Sombra
+        pygame.draw.rect(pantalla, (0, 0, 0, 120), (x - 2, y - 2, w + 6, h + 6))
+        # Fondo
+        pygame.draw.rect(pantalla, EMERALD_BG, (x - 2, y - 2, w + 4, h + 4))
+        pygame.draw.rect(pantalla, EMERALD_BG_DARK, (x, y, w, h))
+        # Borde
+        pygame.draw.rect(pantalla, borde_color, (x - 2, y - 2, w + 4, h + 4), 2)
+        pygame.draw.rect(pantalla, EMERALD_BORDER_LIGHT, (x - 1, y - 1, w + 2, h + 2), 1)
+
+    @staticmethod
+    def dibujar_boton(pantalla, x, y, w, h, texto, fuente, seleccionado=False, color=None):
+        """Boton con estilo Emerald."""
+        if color is None:
+            color = EMERALD_GOLD
+        if seleccionado:
+            pygame.draw.rect(pantalla, color, (x - 2, y - 2, w + 4, h + 4), 3)
+            pygame.draw.rect(pantalla, EMERALD_GOLD_LIGHT, (x, y, w, h), 1)
+            col_texto = EMERALD_TEXT
+        else:
+            pygame.draw.rect(pantalla, EMERALD_BORDER, (x - 2, y - 2, w + 4, h + 4), 1)
+            col_texto = EMERALD_TEXT_LIGHT
+        t = fuente.render(texto, True, col_texto)
+        pantalla.blit(t, (x + w // 2 - t.get_width() // 2, y + h // 2 - t.get_height() // 2))
+
+    @staticmethod
+    def dibujar_barra_hp(pantalla, x, y, w, h, ratio, mostrar_texto=False, fuente=None,
+                          ps_actual=0, ps_max=0):
+        """Barra de HP estilo Emerald con segmentos."""
+        # Fondo
+        pygame.draw.rect(pantalla, (40, 30, 40), (x - 1, y - 1, w + 2, h + 2))
+        pygame.draw.rect(pantalla, (80, 70, 90), (x, y, w, h))
+        # Relleno
+        col = (80, 220, 80) if ratio > 0.5 else (240, 200, 60) if ratio > 0.2 else (220, 60, 60)
+        col_dark = tuple(max(0, c - 60) for c in col)
+        relleno = int(w * max(0, min(1, ratio)))
+        if relleno > 0:
+            pygame.draw.rect(pantalla, col_dark, (x, y + h // 2, relleno, h - h // 2))
+            pygame.draw.rect(pantalla, col, (x, y, relleno, h // 2))
+        # Borde
+        pygame.draw.rect(pantalla, (0, 0, 0), (x, y, w, h), 1)
+        # Texto
+        if mostrar_texto and fuente:
+            t = fuente.render(f"{ps_actual}/{ps_max}", True, (255, 255, 255))
+            pygame.draw.rect(pantalla, (0, 0, 0), (x + w + 4, y - 2, t.get_width() + 6, h + 4))
+            pantalla.blit(t, (x + w + 7, y - 2))
+
+    @staticmethod
+    def dibujar_barra_exp(pantalla, x, y, w, h, ratio):
+        """Barra de EXP azul cielo."""
+        pygame.draw.rect(pantalla, (20, 30, 60), (x, y, w, h))
+        relleno = int(w * max(0, min(1, ratio)))
+        if relleno > 0:
+            pygame.draw.rect(pantalla, (100, 210, 255), (x, y, relleno, h))
+            pygame.draw.rect(pantalla, (180, 235, 255), (x, y, relleno, h // 2))
+        pygame.draw.rect(pantalla, (0, 0, 0), (x, y, w, h), 1)
+
+    @staticmethod
+    def dibujar_cursor(pantalla, x, y, color=EMERALD_GOLD):
+        """Cursor triangular estilo Emerald."""
+        pygame.draw.polygon(pantalla, (0, 0, 0), [
+            (x + 1, y + 1), (x + 11, y + 7), (x + 1, y + 13)
+        ])
+        pygame.draw.polygon(pantalla, color, [
+            (x, y), (x + 10, y + 6), (x, y + 12)
+        ])
+
+    @staticmethod
+    def dibujar_flecha_continuar(pantalla, x, y, t):
+        """Flecha roja parpadeante tipo Pokemon."""
+        import math
+        bob = int(math.sin(t * 8) * 2)
+        pygame.draw.polygon(pantalla, (100, 40, 40), [
+            (x, y + bob), (x + 12, y + bob), (x + 6, y + 9 + bob)
+        ])
+        pygame.draw.polygon(pantalla, (240, 80, 80), [
+            (x + 1, y + bob + 1), (x + 11, y + bob + 1), (x + 6, y + 8 + bob)
+        ])
+
+    @staticmethod
+    def dibujar_icono_tipo(pantalla, tipo, x, y, tam=20, fuente=None):
+        """Cajita coloreada con el tipo."""
+        col = {
+            "Fuego": (240, 120, 60), "Agua": (80, 150, 240),
+            "Planta": (110, 200, 100), "Electrico": (240, 210, 60),
+            "Eléctrico": (240, 210, 60), "Hielo": (140, 220, 230),
+            "Lucha": (200, 80, 60), "Siniestro": (90, 70, 90),
+            "Fantasma": (120, 100, 170), "Veneno": (160, 90, 200),
+            "Tierra": (200, 160, 80), "Roca": (180, 150, 90),
+            "Acero": (170, 180, 200), "Psiquico": (240, 100, 160),
+            "Psíquico": (240, 100, 160), "Bicho": (170, 200, 80),
+            "Volador": (180, 200, 240), "Dragon": (90, 90, 230),
+            "Dragón": (90, 90, 230), "Hada": (240, 170, 220),
+            "Sonido": (150, 220, 220), "Normal": (180, 180, 160),
+        }.get(tipo, (180, 180, 160))
+        pygame.draw.rect(pantalla, (0, 0, 0), (x - 1, y - 1, tam + 2, tam + 2))
+        pygame.draw.rect(pantalla, col, (x, y, tam, tam))
+        pygame.draw.rect(pantalla, tuple(max(0, c - 60) for c in col), (x, y + tam // 2, tam, tam // 2))
+        if fuente:
+            tt = fuente.render(tipo[:3].upper(), True, (255, 255, 255))
+            pantalla.blit(tt, (x + tam // 2 - tt.get_width() // 2, y + tam // 2 - tt.get_height() // 2))
+
+    @staticmethod
+    def dibujar_medalla(pantalla, x, y, tam=24, obtenida=False):
+        """Icono de medalla dorada."""
+        col = (240, 200, 60) if obtenida else (120, 110, 90)
+        col_l = (255, 240, 140) if obtenida else (160, 150, 120)
+        col_d = (140, 100, 20) if obtenida else (80, 70, 60)
+        cx, cy = x + tam // 2, y + tam // 2
+        # Circulo exterior
+        pygame.draw.circle(pantalla, (0, 0, 0), (cx, cy), tam // 2 + 1)
+        pygame.draw.circle(pantalla, col_d, (cx, cy), tam // 2)
+        pygame.draw.circle(pantalla, col, (cx, cy), tam // 2 - 2)
+        pygame.draw.circle(pantalla, col_l, (cx - 2, cy - 2), tam // 4)
+        # Detalle de estrella
+        if obtenida:
+            pygame.draw.circle(pantalla, (255, 255, 255), (cx, cy), 2)
+
+
+print("OK sistemas.ui_kit")

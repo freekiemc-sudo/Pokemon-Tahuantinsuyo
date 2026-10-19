@@ -1,0 +1,2171 @@
+# sistemas/mapa_visual.py - VERSIÓN EXPANDIDA
+"""
+Mapas por tiles GRANDES (60x40) estilo Esmeralda con:
+- Océano animado con olas y espuma
+- Cuevas oscuras con antorchas
+- Montañas escalables (MO Escalada)
+- Agua navegable (MO Navegación)
+- Arbustos cortables (MO Corte)
+- Rocas rompibles (MO Golpe Roca)
+- Plataformas y acantilados con saltos
+- Letreros, MTs en el suelo, objetos brillantes
+- Interiores conectados
+"""
+import math, random, pygame
+
+TILE_SIZE = 16
+MAP_WIDTH = 60
+MAP_HEIGHT = 40
+
+# ─── TIPOS DE TILE (27 → 45) ────────────────────────────────
+(PASTO, HIERBA_ALTA, AGUA, ARBOL, CAMINO, ARENA, ROCA, NIEVE, EDIFICIO,
+ PUERTA, FLORES, TIERRA, NIEVE_PROF, DUNA, TECHO, MURO_GYM, PALMERA,
+ CACTUS, LEDGE, ACANTILADO, ARBUSTO, SIGN, AGUA_PROF, FLOR_AMARILLA,
+ FLOR_ROJA, ARENA_CLARA, SIGN_INFO,
+ # NUEVOS:
+ AGUA_OCEANO,      # 27 - mar abierto, olas
+ ARENA_PLAYA,      # 28 - playa
+ ROCA_ESCALABLE,   # 29 - muro trepable con MO
+ ROCA_ROMPIBLE,    # 30 - roca chica rompible con MO
+ CUEVA_PISO,       # 31 - piso de cueva
+ CUEVA_PARED,      # 32 - pared de cueva
+ CUEVA_OSCURA,     # 33 - zona negra
+ ANTORCHA,         # 34 - ilumina cueva
+ CASCADA,          # 35 - cascada
+ PUENTE,           # 36 - puente de madera
+ ARBUSTO_CORTABLE, # 37 - se corta con MO
+ MT_SUELO,         # 38 - MT recogible
+ OBJ_BRILLANTE,    # 39 - item en el suelo
+ TELEPORT,         # 40 - warp (entrada cueva)
+ MONTAÑA,          # 41 - tile de montaña alta (fondo)
+ LAGO,             # 42 - lago navegable
+ ARENA_OSCURA,     # 43 - arena mojada
+ PIEDRA_SAGRADA,   # 44 - decorativa
+) = range(45)
+
+# ─── CAMINABLES ────────────────────────────────────────────
+CAMINABLES = {
+    PASTO, HIERBA_ALTA, CAMINO, ARENA, NIEVE, PUERTA, FLORES, TIERRA,
+    NIEVE_PROF, DUNA, FLOR_AMARILLA, FLOR_ROJA, ARENA_CLARA, SIGN_INFO,
+    ARENA_PLAYA, CUEVA_PISO, PUENTE, ARBUSTO_CORTABLE, MT_SUELO,
+    OBJ_BRILLANTE, TELEPORT, ARENA_OSCURA, PIEDRA_SAGRADA,
+    ROCA_ESCALABLE,  # solo caminable si tienes MO Escalada (lo comprueba el juego)
+    ROCA_ROMPIBLE,   # solo caminable si tienes MO Golpe Roca
+     AGUA, AGUA_PROF, AGUA_OCEANO, LAGO,   # ← añadir estas
+}
+
+# Tiles que requieren MO específica
+MO_REQUERIDA = {
+    ROCA_ESCALABLE: "Escalada Andina",
+    ROCA_ROMPIBLE:  "Golpe Roca",
+    AGUA:           "Navegación Fluvial",
+    AGUA_PROF:      "Navegación Fluvial",
+    AGUA_OCEANO:    "Navegación Fluvial",
+    LAGO:           "Navegación Fluvial",
+    ARBUSTO_CORTABLE: "Corte / Tala",
+}
+
+# Fix: SOLO hierba alta da encuentros (como Emerald)
+ENCUENTRO = {HIERBA_ALTA, NIEVE_PROF}
+ENCUENTRO_CUEVA = {CUEVA_PISO}
+
+# ─── POSICIONES (mismas que tenías + nuevas) ────────────────
+GIMNASIO_POS = {
+    "ciudad_moche":    (30, 12), "puerto_ancon":    (30, 12),
+    "andahuaylas":     (30, 12), "ciudad_imperial": (30, 12),
+    "puno":            (30, 12), "huaraz":          (30, 12),
+    "puerto_selva":    (30, 12), "ciudad_capital":  (30, 12),
+}
+TAMBO_POS = {
+    "ciudad_moche":    (14, 28), "puerto_ancon":    (46, 28),
+    "andahuaylas":     (14, 28), "ciudad_imperial": (46, 28),
+    "puno":            (14, 28), "huaraz":          (46, 28),
+    "puerto_selva":    (14, 28), "ciudad_capital":  (46, 28),
+}
+
+# Mapas que tienen cuevas accesibles
+CUEVAS_ACCESIBLES = {
+    "ruta_1":   "cueva_costera",
+    "ruta_3":   "cueva_marina",
+    "ruta_4":   "cueva_cordillera",
+    "ruta_5":   "cueva_hielo",
+    "ruta_7":   "cueva_selva",
+}
+
+
+TIENDA_POS = {
+    "ciudad_moche":    (46, 28), "puerto_ancon":    (14, 28),
+    "andahuaylas":     (46, 28), "ciudad_imperial": (14, 28),
+    "puno":            (46, 28), "huaraz":          (14, 28),
+    "puerto_selva":    (46, 28), "ciudad_capital":  (14, 28),
+}
+
+# ─── MAPAS (60x40 ahora, más rutas y biomas) ─────────────────
+DEFINICIONES = {
+    "caleta_norte":    {"tipo": "pueblo", "bioma": "costa",     "w": 60, "h": 40},
+    "ruta_1":          {"tipo": "ruta",   "bioma": "costa",     "w": 90, "h": 40, "pasto": 0.18, "agua": 2, "oceano": True},
+    "ciudad_moche":    {"tipo": "pueblo", "bioma": "costa",     "w": 60, "h": 40},
+    "ruta_2":          {"tipo": "ruta",   "bioma": "valle",     "w": 90, "h": 40, "pasto": 0.22, "agua": 1, "cueva": True},
+    "puerto_ancon":    {"tipo": "pueblo", "bioma": "costa",     "w": 60, "h": 40, "mar": True},
+    "ruta_3":          {"tipo": "ruta",   "bioma": "costa",     "w": 90, "h": 40, "pasto": 0.16, "rocas": 40, "cueva": True},
+    "andahuaylas":     {"tipo": "pueblo", "bioma": "valle",     "w": 60, "h": 40},
+    "ruta_4":          {"tipo": "ruta",   "bioma": "sierra",    "w": 90, "h": 40, "pasto": 0.15, "rocas": 60, "montaña": True},
+    "ciudad_imperial": {"tipo": "pueblo", "bioma": "sierra",    "w": 60, "h": 40},
+    "ruta_5":          {"tipo": "ruta",   "bioma": "paramo",    "w": 90, "h": 40, "pasto": 0.22, "rocas": 30, "nieve": True},
+    "puno":            {"tipo": "pueblo", "bioma": "altiplano", "w": 60, "h": 40, "lago": True},
+    "ruta_6":          {"tipo": "ruta",   "bioma": "altiplano", "w": 90, "h": 40, "pasto": 0.20, "agua": 3},
+    "huaraz":          {"tipo": "pueblo", "bioma": "paramo",    "w": 60, "h": 40},
+    "ruta_7":          {"tipo": "ruta",   "bioma": "selva",     "w": 90, "h": 40, "pasto": 0.32, "agua": 3, "arbustos": True},
+    "puerto_selva":    {"tipo": "pueblo", "bioma": "selva",     "w": 60, "h": 40, "rio": True},
+    "ruta_8":          {"tipo": "ruta",   "bioma": "selva",     "w": 90, "h": 40, "pasto": 0.34, "agua": 4, "arbustos": True},
+    "ciudad_capital":  {"tipo": "pueblo", "bioma": "capital",   "w": 60, "h": 40},
+    # ====== CUEVAS ======
+    "cueva_costera":   {"tipo": "cueva",  "bioma": "costa",     "w": 40, "h": 30},
+    "cueva_marina":    {"tipo": "cueva",  "bioma": "costa",     "w": 40, "h": 30},
+    "cueva_cordillera":{"tipo": "cueva",  "bioma": "sierra",    "w": 40, "h": 30},
+    "cueva_hielo":     {"tipo": "cueva",  "bioma": "paramo",    "w": 40, "h": 30},
+    "cueva_selva":     {"tipo": "cueva",  "bioma": "selva",     "w": 40, "h": 30},
+    "cumbre_niebla":   {"tipo": "cueva",  "bioma": "paramo",    "w": 40, "h": 30},
+}
+ORDEN = list(DEFINICIONES.keys())
+Y_SALIDA = (18, 19, 20, 21)
+
+PALETA_PASTO = {
+    "costa":     ((160, 216, 144), (136, 200, 116), (120, 184, 100)),
+    "valle":     ((156, 224, 128), (132, 208, 108), (116, 192, 92)),
+    "sierra":    ((176, 216, 128), (152, 200, 112), (132, 184, 96)),
+    "paramo":    ((232, 244, 240), (216, 236, 232), (200, 224, 220)),
+    "altiplano": ((184, 208, 128), (164, 192, 112), (148, 176, 96)),
+    "selva":     ((112, 184, 96),  (88, 168, 88),   (72, 152, 80)),
+    "capital":   ((160, 216, 144), (140, 200, 120), (124, 184, 104)),
+}
+
+# ─── RNG / helpers ────────────────────────────────────────
+def _rng(id_mapa):
+    return random.Random(sum(ord(c) * (i + 1) for i, c in enumerate(id_mapa)) * 7919)
+
+def _vacio(w, h, tile):
+    return [[tile for _ in range(w)] for _ in range(h)]
+
+def _rect(t, x0, y0, x1, y1, tile):
+    for y in range(max(0, y0), min(len(t), y1 + 1)):
+        for x in range(max(0, x0), min(len(t[0]), x1 + 1)):
+            t[y][x] = tile
+
+def _elipse(t, cx, cy, rx, ry, tile, solo_sobre=None):
+    for y in range(int(cy - ry) - 1, int(cy + ry) + 2):
+        for x in range(int(cx - rx) - 1, int(cx + rx) + 2):
+            if 0 <= y < len(t) and 0 <= x < len(t[0]):
+                if ((x - cx) / max(rx, .5)) ** 2 + ((y - cy) / max(ry, .5)) ** 2 <= 1.0:
+                    if solo_sobre is None or t[y][x] in solo_sobre:
+                        t[y][x] = tile
+
+# ═════════════════════════════════════════════════════════
+# DIBUJO DE TILES
+# ═════════════════════════════════════════════════════════
+_CACHE = {}
+
+def _tile_surface(tipo, bioma, variacion, frame=0):
+    key = (tipo, bioma, variacion, frame)
+    if key in _CACHE: return _CACHE[key]
+    T = TILE_SIZE
+    p = pygame.Surface((T, T), pygame.SRCALPHA)
+    rng = random.Random(hash((tipo, bioma, variacion)) & 0xFFFFFFFF)
+
+    if tipo == PASTO:
+        arriba, base, abajo = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2)); p.fill(abajo, (0,T-3,T,3))
+        for _ in range(5):
+            p.set_at((rng.randint(0,T-1), rng.randint(3,T-3)),
+                     (base[0]-16, base[1]-16, base[2]-16))
+        for _ in range(3):
+            p.set_at((rng.randint(0,T-1), rng.randint(3,T-3)),
+                     (arriba[0], arriba[1], arriba[2]))
+        if rng.random() < 0.06:
+            fx, fy = rng.randint(3, T-4), rng.randint(4, T-5)
+            pygame.draw.circle(p, (250,250,255), (fx,fy), 1)
+            p.set_at((fx,fy), (255,210,80))
+
+    elif tipo == HIERBA_ALTA:
+        # Estilo Emerald: fondo verde oscuro con briznas de hierba
+        base = (56, 128, 48)
+        base_dark = (36, 88, 36)
+        brizna_dark = (28, 72, 28)
+        brizna_light = (96, 176, 80)
+        brizna_hi = (144, 216, 112)
+        p.fill(base)
+        p.fill(base_dark, (0, T-2, T, 2))
+        # Briznas densas en 3 filas
+        rng_h = random.Random(hash((variacion, bioma)) & 0xFFFFFFFF)
+        for fila in range(3):
+            y_base = 4 + fila * 4
+            for col in range(8):
+                # Offset alternado
+                x = col * 2 + (fila % 2)
+                if rng_h.random() < 0.15:
+                    continue
+                altura = 3 + rng_h.randint(0, 3)
+                # Brizna oscura (sombra)
+                pygame.draw.line(p, brizna_dark, (x, y_base + altura),
+                                  (x, y_base), 1)
+                # Brizna clara
+                pygame.draw.line(p, brizna_light, (x, y_base + altura - 1),
+                                  (x, y_base - 1), 1)
+                # Punta brillante
+                p.set_at((x, y_base - 1), brizna_hi)
+        # Variacion: si el tile esta en borde de parche, se ve mas alto
+        if variacion % 5 == 0:
+            p.fill((40, 96, 40), (0, 0, T, 2))
+        if variacion % 7 == 0:
+            # Espiguita dorada ocasional
+            pygame.draw.line(p, (240, 220, 120), (7, 12), (7, 6))
+            p.set_at((7, 5), (255, 240, 160))
+
+    elif tipo == AGUA:
+        for y in range(T):
+            k = math.sin(y*0.35) * 6
+            p.fill((int(76+k), int(152+k), 216), (0,y,T,1))
+        off = (frame*6) % 16
+        for wy in (3,8,12):
+            for i in range(-2,3):
+                wx = (off + i*6) % T
+                p.set_at((wx, wy), (176,216,248))
+                p.set_at(((wx+1)%T, wy), (204,232,255))
+        if frame == 0:
+            p.set_at((3,5), (244,250,255)); p.set_at((12,10), (244,250,255))
+
+    elif tipo == AGUA_PROF:
+        for y in range(T):
+            k = math.sin(y*0.35+1.2)*4
+            p.fill((int(56+k), int(120+k), 192), (0,y,T,1))
+        for wy in (5,11):
+            for i in range(-2,3):
+                p.set_at(((frame*4+i*7)%T, wy), (120,176,224))
+
+    elif tipo == AGUA_OCEANO:
+        # Oceano con olas y espuma
+        for y in range(T):
+            k = math.sin(y*0.5+frame*0.8) * 10
+            p.fill((int(30+k), int(90+k), 170), (0,y,T,1))
+        # Cresta de ola
+        crest_y = (frame*4) % T
+        for x in range(T):
+            offset = int(math.sin(x*0.6 + frame) * 1)
+            p.set_at((x, (crest_y+offset)%T), (200,230,255))
+        # Espuma
+        for _ in range(3):
+            p.set_at((rng.randint(0,T-1), rng.randint(0,T-1)), (240,250,255))
+
+    elif tipo == ARENA_PLAYA:
+        p.fill((248, 232, 190))
+        for _ in range(10):
+            p.set_at((rng.randint(0,T-1), rng.randint(0,T-1)), (232,212,168))
+        for _ in range(4):
+            p.set_at((rng.randint(0,T-1), rng.randint(0,T-1)), (255,248,220))
+        # Unas conchitas
+        if rng.random() < 0.15:
+            p.set_at((rng.randint(3,T-4), rng.randint(3,T-4)), (255,240,220))
+
+    elif tipo == ARENA_OSCURA:
+        p.fill((200, 180, 148))
+        for _ in range(6):
+            p.set_at((rng.randint(0,T-1), rng.randint(0,T-1)), (180,158,128))
+
+    elif tipo == ARBOL:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        # Tronco con sombra
+        pygame.draw.rect(p, (72,44,22), (6, 10, 4, 6))
+        pygame.draw.rect(p, (40,24,12), (9, 10, 1, 6))
+        pygame.draw.rect(p, (128,84,44), (6, 10, 1, 6))
+        # Follaje multicapa (más GBA)
+        pygame.draw.ellipse(p, (12,60,28), (0, 3, 16, 11))
+        pygame.draw.ellipse(p, (24,92,40), (0, 2, 15, 11))
+        pygame.draw.ellipse(p, (48,128,52), (1, 1, 13, 10))
+        pygame.draw.ellipse(p, (72,164,72), (2, 0, 11, 8))
+        pygame.draw.ellipse(p, (108,204,96), (3, 1, 7, 5))
+        pygame.draw.ellipse(p, (160,236,132), (4, 2, 4, 3))
+        # Toques de brillo
+        p.set_at((5, 2), (220,255,200))
+        p.set_at((10, 1), (220,255,200))
+
+    elif tipo == PALMERA:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        p.fill((124,84,56), (7,8,2,7)); p.fill((96,64,40), (7,8,1,7))
+        pygame.draw.arc(p, (88,168,88), (3,2,11,11), 3.2, 6.3, 2)
+        pygame.draw.arc(p, (88,168,88), (2,3,11,11), 3.5, 6.0, 2)
+        pygame.draw.arc(p, (56,132,64), (4,4,9,9), 3.3, 6.1, 1)
+
+    elif tipo == CACTUS:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        p.fill((48,140,80), (6,4,4,10)); p.fill((72,176,100), (7,4,2,10))
+        p.fill((48,140,80), (3,6,3,2)); p.fill((48,140,80), (3,6,1,5))
+        p.fill((48,140,80), (10,8,3,2)); p.fill((48,140,80), (12,8,1,5))
+
+    elif tipo == CAMINO:
+        p.fill((216,192,148)); p.fill((184,160,120), (0,0,T,1)); p.fill((232,208,164), (0,T-1,T,1))
+        for _ in range(6):
+            p.set_at((rng.randint(0,T-1), rng.randint(2,T-3)), (200,176,132))
+
+    elif tipo == ARENA:
+        p.fill((240,216,168)); p.fill((248,224,176), (0,0,T,1)); p.fill((224,200,152), (0,T-1,T,1))
+        for _ in range(8):
+            p.set_at((rng.randint(0,T-1), rng.randint(0,T-1)), (216,192,144))
+
+    elif tipo == ARENA_CLARA:
+        p.fill((248,228,184))
+        for _ in range(6):
+            p.set_at((rng.randint(0,T-1), rng.randint(0,T-1)), (232,208,168))
+
+    elif tipo == DUNA:
+        p.fill((228,200,152)); p.fill((212,184,136), (0,0,T,1))
+
+    elif tipo == TIERRA:
+        p.fill((168,128,88)); p.fill((148,108,72), (0,T-2,T,2)); p.fill((188,148,108), (0,0,T,1))
+        for _ in range(4):
+            p.fill((132,96,60), (rng.randint(2,T-4), rng.randint(3,T-4), 2, 2))
+
+    elif tipo == NIEVE:
+        p.fill((232,240,248)); p.fill((244,250,255), (0,0,T,1)); p.fill((216,228,240), (0,T-1,T,1))
+
+    elif tipo == NIEVE_PROF:
+        p.fill((208,220,236)); p.fill((196,208,224), (0,T-2,T,2))
+        fase = math.sin(frame*0.6+variacion)
+        for i, hx in enumerate([3,7,11]):
+            p.fill((180,200,220), ((hx+int(fase*(1 if i%2 else -1)))%T, T-4, 2, 4))
+
+    elif tipo == FLORES:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        for (fx,fy,c1,c2) in [(3,6,(240,90,120),(255,190,210)),
+                              (11,10,(255,220,90),(255,248,180)),
+                              (7,13,(200,110,240),(230,190,250))]:
+            pygame.draw.circle(p, c1, (fx,fy), 2)
+            p.set_at((fx-1,fy-1), c2); p.set_at((fx,fy), (255,255,220))
+
+    elif tipo == FLOR_AMARILLA:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        for (fx,fy) in [(4,5),(11,7),(6,12),(12,13)]:
+            pygame.draw.circle(p, (255,220,60), (fx,fy), 2); p.set_at((fx,fy), (255,245,140))
+
+    elif tipo == FLOR_ROJA:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        for (fx,fy) in [(5,6),(11,4),(7,12),(13,10)]:
+            pygame.draw.circle(p, (230,60,80), (fx,fy), 2); p.set_at((fx,fy), (255,180,180))
+
+    elif tipo == ROCA:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        pygame.draw.ellipse(p, (60,60,66), (2,5,12,10))
+        pygame.draw.ellipse(p, (110,110,116), (3,5,10,7))
+        pygame.draw.ellipse(p, (150,150,156), (4,5,7,4))
+
+    elif tipo == ROCA_ESCALABLE:
+        # Pared de piedra escalable (MO Escalada)
+        p.fill((100,90,80))
+        for y in range(0, T, 4):
+            p.fill((70,62,54), (0,y,T,1))
+        for x in range(0, T, 5):
+            p.fill((80,72,64), (x,0,1,T))
+        # Brillo sutil arriba
+        p.fill((150,140,130), (0,0,T,1))
+        # Unas marcas de "agarre"
+        for _ in range(4):
+            p.set_at((rng.randint(2,T-3), rng.randint(2,T-3)), (200,180,150))
+
+    elif tipo == ROCA_ROMPIBLE:
+        # Roca chica rompible
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        pygame.draw.ellipse(p, (140,130,120), (3,4,10,9))
+        pygame.draw.ellipse(p, (180,170,160), (4,4,8,7))
+        pygame.draw.ellipse(p, (210,200,190), (5,4,5,4))
+        # grieta
+        pygame.draw.line(p, (60,50,40), (7,6), (9,11), 1)
+
+    elif tipo == CUEVA_PISO:
+        p.fill((90,78,68))
+        for _ in range(8):
+            p.set_at((rng.randint(0,T-1), rng.randint(0,T-1)), (78,66,58))
+        for _ in range(3):
+            p.set_at((rng.randint(0,T-1), rng.randint(0,T-1)), (110,96,84))
+
+    elif tipo == CUEVA_PARED:
+        p.fill((58,48,42))
+        for y in range(0,T,5):
+            for x in range(0,T,6):
+                off = (y//5 % 2) * 3
+                pygame.draw.rect(p, (72,60,52), (x+off, y, 5, 4))
+                p.set_at((x+off, y), (90,78,68))
+
+    elif tipo == CUEVA_OSCURA:
+        p.fill((18,14,20))
+        # Un par de estrellas remotas
+        for _ in range(2):
+            p.set_at((rng.randint(0,T-1), rng.randint(0,T-1)), (60,60,80))
+
+    elif tipo == ANTORCHA:
+        p.fill((58,48,42))
+        # Antorcha con llama parpadeante
+        p.fill((90,60,30), (7,6,2,9))
+        fx = 8
+        fy = 5
+        col_fuego = [(255,180,60), (255,120,40), (255,220,100)][frame % 3]
+        pygame.draw.circle(p, col_fuego, (fx, fy), 3)
+        pygame.draw.circle(p, (255,240,180), (fx, fy), 1)
+        # Halo
+        pygame.draw.circle(p, (255,220,140,60), (fx, fy), 6, 1)
+
+    elif tipo == CASCADA:
+        for y in range(T):
+            k = math.sin(y*0.7+frame) * 3
+            p.fill((int(140+k), int(200+k), 240), (0,y,T,1))
+        for x in range(0,T,3):
+            p.fill((220,240,255), (x, 0, 1, T))
+        # Espuma abajo
+        pygame.draw.ellipse(p, (240,250,255), (2, 11, 12, 4))
+
+    elif tipo == PUENTE:
+        # Puente de madera
+        p.fill((140,90,50))
+        for y in range(0,T,3):
+            p.fill((100,64,36), (0,y,T,1))
+        p.fill((170,120,70), (0,0,T,1))
+        p.fill((80,50,28), (0,T-1,T,1))
+
+    elif tipo == ARBUSTO_CORTABLE:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        pygame.draw.ellipse(p, (30,90,40), (0,2,16,12))
+        pygame.draw.ellipse(p, (50,120,55), (1,3,14,10))
+        pygame.draw.ellipse(p, (80,170,90), (2,4,12,7))
+        # espinas para que se vea cortable
+        for _ in range(3):
+            sx, sy = rng.randint(3,T-4), rng.randint(4,T-5)
+            p.set_at((sx,sy), (240,240,180))
+
+    elif tipo == MT_SUELO:
+        # MT (disco/cassette amarillo brillando)
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        # Aura pulsante
+        br = int(abs(math.sin(frame*0.15)) * 3)
+        pygame.draw.circle(p, (255,240,140), (8,8), 6+br, 1)
+        pygame.draw.rect(p, (230,180,60), (4,5,8,7))
+        pygame.draw.rect(p, (255,240,140), (4,5,8,2))
+        pygame.draw.rect(p, (150,100,30), (4,5,8,7), 1)
+        p.set_at((6,8), (255,255,255)); p.set_at((10,8), (255,255,255))
+
+    elif tipo == OBJ_BRILLANTE:
+        # Pokeball u objeto brillando
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        # destellos
+        for i in range(4):
+            ang = frame*0.3 + i*1.57
+            ox = int(math.cos(ang) * 5)
+            oy = int(math.sin(ang) * 5)
+            p.set_at((8+ox, 8+oy), (255,255,240))
+        pygame.draw.circle(p, (220,50,50), (8,8), 4)
+        pygame.draw.rect(p, (250,250,250), (4,8,8,4))
+        pygame.draw.rect(p, (40,40,40), (4,7,8,2))
+        pygame.draw.circle(p, (250,250,250), (8,8), 1)
+
+    elif tipo == TELEPORT:
+        # Entrada de cueva / portal
+        p.fill((30,22,18))
+        pygame.draw.ellipse(p, (10,6,4), (1, 2, 14, 14))
+        pygame.draw.ellipse(p, (60,40,30), (2, 3, 12, 12), 2)
+        p.set_at((8,8), (240,200,60))
+        p.set_at((7,9), (240,200,60))
+
+    elif tipo == MONTAÑA:
+        # Montaña alta (fondo, no caminable)
+        p.fill((70,64,58))
+        # Capas rocosas
+        for y in range(0,T,4):
+            shade = 90 - (y//4)*6
+            p.fill((shade, shade-10, shade-20), (0,y,T,2))
+        # Nieve en la punta
+        p.fill((230,240,250), (4,0,8,3))
+        p.set_at((3,3), (200,210,225))
+
+    elif tipo == LAGO:
+        # Como agua pero con reflejos
+        for y in range(T):
+            k = math.sin(y*0.4+frame*0.7)*7
+            p.fill((int(60+k), int(130+k), 200), (0,y,T,1))
+        # Reflejo de montaña
+        for x in range(4,12):
+            p.set_at((x, 3), (150,180,220))
+            p.set_at((x, 4), (130,160,210))
+
+    elif tipo == PIEDRA_SAGRADA:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        # Piedra tallada
+        pygame.draw.rect(p, (130,120,100), (3,4,10,10))
+        pygame.draw.rect(p, (170,158,132), (4,5,8,8))
+        pygame.draw.rect(p, (90,82,70), (4,5,8,8), 1)
+        # Símbolo inca
+        pygame.draw.line(p, (200,170,60), (5,8), (11,8), 1)
+        pygame.draw.line(p, (200,170,60), (8,6), (8,11), 1)
+
+    elif tipo == EDIFICIO:
+        # Pared con dos ventanas GBA
+        p.fill((216,176,136))
+        # Textura de adobe
+        for y in range(0, T, 3):
+            p.fill((198,158,118), (0, y, T, 1))
+        # Sombra esquina
+        p.fill((176,128,88), (T-2, 0, 2, T))
+        # Ventanas con marco y cortinas
+        for wx in (2, 10):
+            pygame.draw.rect(p, (60, 40, 24), (wx, 3, 4, 5))
+            pygame.draw.rect(p, (110, 180, 220), (wx+1, 4, 2, 3))
+            pygame.draw.rect(p, (240, 240, 250), (wx+1, 4, 2, 1))
+            # Cruz del marco
+            p.set_at((wx+2, 4), (60,40,24))
+            p.set_at((wx+2, 6), (60,40,24))
+        # Base
+        p.fill((160,116,80), (0, T-2, T, 2))
+
+    elif tipo == PUERTA:
+        p.fill((176,128,88)); p.fill((96,64,40), (3,2,10,14))
+        p.fill((120,88,60), (8,3,4,12))
+        pygame.draw.circle(p, (240,200,60), (11,9), 2)
+
+    elif tipo == TECHO:
+        # Tejas andinas en 3 filas
+        for i in range(0, T, 3):
+            # Sombra de fila
+            p.fill((120, 44, 40), (0, i, T, 1))
+            # Teja clara
+            p.fill((196, 68, 60), (0, i+1, T, 2))
+            # Brillo
+            p.fill((232, 116, 100), (0, i+1, T, 1))
+            # Surcos verticales
+            for x in range(2, T, 4):
+                p.set_at((x, i+1), (160, 50, 44))
+                p.set_at((x, i+2), (160, 50, 44))
+
+    elif tipo == MURO_GYM:
+        p.fill((120,120,124))
+        for i in range(0,T,4):
+            p.fill((96,96,100), (0,i,T,1))
+
+    elif tipo == LEDGE:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        p.fill((48,36,24), (0,7,T,1))
+        for y in range(8,T):
+            k = (y-8)%4
+            p.fill((216,176,120) if k<2 else (176,136,88), (0,y,T,1))
+        for x in (3,8,13):
+            p.fill((120,88,56), (x,9,1,T-9))
+
+    elif tipo == ACANTILADO:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        for y in range(6,T):
+            shade = 160 - (y-6)*3
+            p.fill((shade+40, shade, max(40,shade-30)), (0,y,T,1))
+        p.fill((72,52,32), (0,6,T,1))
+        p.fill((216,200,176), (0,7,T,1))
+
+    elif tipo == ARBUSTO:
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        pygame.draw.ellipse(p, (32,96,40), (1,3,14,11))
+        pygame.draw.ellipse(p, (56,136,64), (2,3,12,9))
+        pygame.draw.ellipse(p, (88,176,96), (3,4,10,6))
+
+    elif tipo in (SIGN, SIGN_INFO):
+        arriba, base, _ = PALETA_PASTO.get(bioma, PALETA_PASTO["valle"])
+        p.fill(base); p.fill(arriba, (0,0,T,2))
+        p.fill((120,80,44), (7,10,2,5))
+        if tipo == SIGN_INFO:
+            p.fill((180,60,40), (3,5,10,7))
+            p.fill((250,240,200), (5,8,6,1))
+        else:
+            pygame.draw.rect(p, (60,120,60), (2,4,12,7))
+            pygame.draw.rect(p, (32,76,32), (2,4,12,7), 1)
+
+    else:
+        p.fill((128,128,128))
+
+    _CACHE[key] = p
+    return p
+
+# ═════════════════════════════════════════════════════════
+# GENERACIÓN DE MAPAS
+# ═════════════════════════════════════════════════════════
+def _borde_arboles(t, rng, bioma, w, h):
+    arb = PALMERA if bioma == "costa" else ARBOL
+    for y in range(h):
+        for x in range(w):
+            esquina = x in (0, w-1)
+            if (esquina and y not in Y_SALIDA) or y < 3 or y >= h - 3:
+                if y in Y_SALIDA and esquina: continue
+                t[y][x] = arb if rng.random() < 0.88 else PASTO
+
+def _construir_ruta(id_mapa, d):
+    """Ruta con camino SINUOSO + RAMAS + conexiones dinamicas."""
+    rng = _rng(id_mapa)
+    w, h, bioma = d["w"], d["h"], d["bioma"]
+    t = _vacio(w, h, PASTO)
+
+    # Verificar si tiene conexiones norte/sur
+    conex = CONEXIONES.get(id_mapa, {}) if "CONEXIONES" in dir() else {}
+    tiene_norte = "norte" in conex
+    tiene_sur = "sur" in conex
+    tiene_este = "este" in conex
+    tiene_oeste = "oeste" in conex
+
+    # Variacion organica
+    for y in range(h):
+        for x in range(w):
+            r = rng.random()
+            if r < 0.08:
+                t[y][x] = FLORES if rng.random() < 0.3 else PASTO
+
+    # ============================================================
+    # CAMINO SERPENTEANTE (no lineal)
+    # Entra por la izquierda, serpentea arriba/abajo, sale derecha
+    # ============================================================
+    camino_pts = []
+    # Generar puntos de control del camino
+    n_segmentos = rng.randint(4, 6)
+    x_actual = 0
+    y_actual = h // 2
+    camino_pts.append((x_actual, y_actual))
+    for i in range(n_segmentos):
+        x_sig = x_actual + rng.randint(12, 20)
+        if x_sig >= w:
+            x_sig = w - 1
+        # Y varia mucho mas: puede ir arriba o abajo
+        y_off = rng.choice([-1, 1]) * rng.randint(6, 12)
+        y_sig = max(5, min(h-6, y_actual + y_off))
+        camino_pts.append((x_sig, y_sig))
+        x_actual = x_sig
+        y_actual = y_sig
+    camino_pts.append((w-1, y_actual))
+
+    # Interpolar suavemente entre puntos
+    camino_completo = []
+    for i in range(len(camino_pts) - 1):
+        x0, y0 = camino_pts[i]
+        x1, y1 = camino_pts[i + 1]
+        pasos = max(2, x1 - x0)
+        for j in range(pasos):
+            tt = j / pasos
+            # Suavizar con curva de Bezier simple
+            xx = int(x0 + (x1 - x0) * tt)
+            yy = int(y0 + (y1 - y0) * (3 * tt * tt - 2 * tt * tt * tt))
+            camino_completo.append((xx, yy))
+
+    # Dibujar camino (ancho 3)
+    for (cx, cy) in camino_completo:
+        for dy in (-1, 0, 1):
+            yy = cy + dy
+            if 0 <= yy < h and 0 <= cx < w:
+                if t[yy][cx] not in (AGUA_OCEANO, LAGO):
+                    t[yy][cx] = CAMINO
+
+    # Guardar "centro" para logica de decoracion
+    centro = {}
+    for (cx, cy) in camino_completo:
+        centro[cx] = cy
+
+    # ============================================================
+    # BIFURCACIONES: caminos que van hacia arriba o hacia abajo
+    # (para conectar con salidas norte/sur)
+    # ============================================================
+    if tiene_norte:
+        # Camino desde el centro hacia arriba
+        n_x = w // 2
+        n_y_fin = 1
+        n_y_ini = centro.get(n_x, h // 2)
+        for yy in range(n_y_fin, n_y_ini + 1):
+            for dx in (-1, 0, 1):
+                xx = n_x + dx
+                if 0 <= xx < w and 0 <= yy < h:
+                    if t[yy][xx] not in (AGUA_OCEANO, LAGO, MONTAÑA):
+                        t[yy][xx] = CAMINO
+
+    if tiene_sur:
+        # Camino desde el centro hacia abajo
+        s_x = w // 2
+        s_y_ini = centro.get(s_x, h // 2)
+        s_y_fin = h - 2
+        for yy in range(s_y_ini, s_y_fin + 1):
+            for dx in (-1, 0, 1):
+                xx = s_x + dx
+                if 0 <= xx < w and 0 <= yy < h:
+                    if t[yy][xx] not in (AGUA_OCEANO, LAGO, MONTAÑA):
+                        t[yy][xx] = CAMINO
+
+    # ============================================================
+    # BIFURCACIONES: caminos que van hacia arriba o hacia abajo
+    # (para conectar con salidas norte/sur)
+    # ============================================================
+    if tiene_norte:
+        # Camino desde el centro hacia arriba
+        n_x = w // 2
+        n_y_fin = 1
+        n_y_ini = centro.get(n_x, h // 2)
+        for yy in range(n_y_fin, n_y_ini + 1):
+            for dx in (-1, 0, 1):
+                xx = n_x + dx
+                if 0 <= xx < w and 0 <= yy < h:
+                    if t[yy][xx] not in (AGUA_OCEANO, LAGO, MONTAÑA):
+                        t[yy][xx] = CAMINO
+
+    if tiene_sur:
+        # Camino desde el centro hacia abajo
+        s_x = w // 2
+        s_y_ini = centro.get(s_x, h // 2)
+        s_y_fin = h - 2
+        for yy in range(s_y_ini, s_y_fin + 1):
+            for dx in (-1, 0, 1):
+                xx = s_x + dx
+                if 0 <= xx < w and 0 <= yy < h:
+                    if t[yy][xx] not in (AGUA_OCEANO, LAGO, MONTAÑA):
+                        t[yy][xx] = CAMINO
+
+    # ============================================================
+    # RIOS/AGUA en zonas que el camino NO cruza
+    # ============================================================
+    if d.get("oceano"):
+        mar_y = h - 8
+        for y in range(mar_y, h):
+            for x in range(w):
+                if y == mar_y:
+                    t[y][x] = ARENA_PLAYA
+                elif y == mar_y + 1:
+                    t[y][x] = ARENA_OSCURA
+                else:
+                    t[y][x] = AGUA_OCEANO
+
+    if d.get("agua", 0) > 0:
+        for _ in range(d["agua"]):
+            cx = rng.randint(8, w-9)
+            # Buscar un area sin camino
+            cy_orig = centro.get(cx, h//2)
+            # Elegir arriba o abajo
+            lado = rng.choice([-1, 1])
+            cy = cy_orig + lado * rng.randint(6, 10)
+            cy = max(5, min(h-5, cy))
+            rx, ry = rng.randint(4, 7), rng.randint(2, 4)
+            # Verificar que no choque con el camino
+            no_choca = True
+            for yy in range(max(0, cy-ry-2), min(h, cy+ry+3)):
+                for xx in range(max(0, cx-rx-2), min(w, cx+rx+3)):
+                    if t[yy][xx] == CAMINO:
+                        no_choca = False
+                        break
+                if not no_choca:
+                    break
+            if no_choca:
+                _elipse(t, cx, cy, rx+1, ry+1, ARENA_CLARA)
+                _elipse(t, cx, cy, rx, ry, AGUA if not d.get("lago") else LAGO)
+
+    # ============================================================
+    # DESNIVELES (ledge) - para crear saltos
+    # ============================================================
+    for _ in range(rng.randint(3, 5)):
+        # Elegir un punto del camino
+        idx = rng.randint(10, len(camino_completo) - 10)
+        if idx < 0 or idx >= len(camino_completo):
+            continue
+        cx_, cy_ = camino_completo[idx]
+        # Colocar ledge horizontal
+        for dx in range(-2, 3):
+            xx = cx_ + dx
+            if 0 <= xx < w:
+                if t[cy_ + 1][xx] != CAMINO:
+                    t[cy_ + 1][xx] = LEDGE
+
+    # ============================================================
+    # CUEVAS en puntos estrategicos
+    # ============================================================
+    if d.get("cueva"):
+        # Colocar 2 cuevas en diferentes puntos del camino
+        for _ in range(2):
+            idx = rng.randint(15, len(camino_completo) - 15)
+            if idx < 0 or idx >= len(camino_completo):
+                continue
+            cvx, cvy = camino_completo[idx]
+            # Apartar 8 tiles del camino
+            lado = rng.choice([-1, 1])
+            entrada_y = cvy + lado * rng.randint(4, 6)
+            if not (8 <= entrada_y < h - 8):
+                continue
+            # Hacer la cueva
+            _elipse(t, cvx, entrada_y, 6, 4, CUEVA_PARED)
+            _elipse(t, cvx, entrada_y, 4, 3, CUEVA_PISO)
+            # La entrada conecta al camino
+            t[entrada_y - lado * 3][cvx] = TELEPORT
+            # Antorchas
+            t[entrada_y - 2][cvx - 3] = ANTORCHA
+            t[entrada_y - 2][cvx + 3] = ANTORCHA
+
+    # ============================================================
+    # HIERBA ALTA en parches ORGANICOS
+    # ============================================================
+    tipo_alta = {"paramo": NIEVE_PROF, "costa": DUNA}.get(bioma, HIERBA_ALTA)
+
+    def puede_hierba(x, y):
+        if not (0 <= x < w and 0 <= y < h):
+            return False
+        if t[y][x] not in (PASTO, FLORES, FLOR_AMARILLA, FLOR_ROJA, TIERRA):
+            return False
+        # Distancia al camino
+        c_centro = centro.get(x, h//2)
+        if abs(y - c_centro) <= 2:
+            return False
+        return True
+
+    # ZONAS DE HIERBA ALTA: parches RECTANGULARES grandes (estilo Emerald)
+    # En Emerald, los parches son rectangulos de 3-8 tiles de ancho
+    n_parches = max(3, int(w * d.get("pasto", 0.18) * 0.8))
+    parches_colocados = 0
+    intentos = 0
+    while parches_colocados < n_parches and intentos < n_parches * 10:
+        intentos += 1
+        # Punto de inicio del parche
+        px = rng.randint(4, w - 10)
+        py_base = centro.get(px, h//2)
+        lado = rng.choice([-1, 1])
+        py = py_base + lado * rng.randint(4, 12)
+        if not (3 <= py < h - 3):
+            continue
+        # Tamaño del parche (estilo Emerald: 3-7 ancho, 2-5 alto)
+        pw = rng.randint(4, 8)
+        ph = rng.randint(3, 5)
+        # Verificar que el parche no choque con el camino
+        libre = True
+        for yy in range(py, min(py + ph, h)):
+            for xx in range(px, min(px + pw, w)):
+                if t[yy][xx] in (CAMINO, PUERTA, AGUA, LAGO, AGUA_OCEANO, TELEPORT):
+                    libre = False
+                    break
+                c_c = centro.get(xx, h//2)
+                if abs(yy - c_c) <= 2:
+                    libre = False
+                    break
+            if not libre:
+                break
+        if not libre:
+            continue
+        # Colocar el parche con BORDES IRREGULARES (mas natural)
+        for yy in range(py, min(py + ph, h)):
+            for xx in range(px, min(px + pw, w)):
+                # Esquinas redondeadas (quitar 25% en los bordes)
+                es_borde = (xx == px or xx == px + pw - 1 or
+                            yy == py or yy == py + ph - 1)
+                if es_borde and rng.random() < 0.35:
+                    continue
+                if puede_hierba(xx, yy):
+                    t[yy][xx] = tipo_alta
+        parches_colocados += 1
+
+    # ============================================================
+    # ARBOLES en clusters, lejos del camino
+    # ============================================================
+    arb = {"costa": PALMERA, "sierra": CACTUS, "paramo": ROCA}.get(bioma, ARBOL)
+    n_clusters = int(w * 0.04) if bioma != "selva" else int(w * 0.08)
+    for _ in range(n_clusters):
+        cx = rng.randint(4, w-5)
+        cy = rng.randint(4, h-5)
+        # Lejos del camino
+        cy_c = centro.get(cx, h//2)
+        if abs(cy - cy_c) < 5:
+            continue
+        for _ in range(rng.randint(3, 7)):
+            ang = rng.uniform(0, 2*math.pi)
+            r = rng.uniform(0, 3)
+            x = int(cx + math.cos(ang) * r)
+            y = int(cy + math.sin(ang) * r)
+            if 0 <= x < w and 0 <= y < h:
+                if t[y][x] == PASTO:
+                    t[y][x] = arb
+
+    # ============================================================
+    # ROCAS sueltas
+    # ============================================================
+    for _ in range(d.get("rocas", 0) // 3):
+        cx = rng.randint(4, w-5)
+        cy = rng.randint(4, h-5)
+        cy_c = centro.get(cx, h//2)
+        if abs(cy - cy_c) < 3:
+            continue
+        for _ in range(rng.randint(2, 4)):
+            x = cx + rng.randint(-2, 2)
+            y = cy + rng.randint(-2, 2)
+            if 0 <= x < w and 0 <= y < h:
+                if t[y][x] == PASTO:
+                    t[y][x] = ROCA if rng.random() < 0.7 else ROCA_ROMPIBLE
+
+    # ============================================================
+    # MTs y objetos
+    # ============================================================
+    for _ in range(rng.randint(2, 4)):
+        for _ in range(30):
+            x = rng.randint(8, w-8)
+            y = rng.randint(6, h-6)
+            c_centro = centro.get(x, h//2)
+            if t[y][x] == PASTO and abs(y - c_centro) > 4:
+                t[y][x] = MT_SUELO
+                break
+
+    for _ in range(rng.randint(1, 3)):
+        for _ in range(30):
+            x = rng.randint(8, w-8)
+            y = rng.randint(6, h-6)
+            c_centro = centro.get(x, h//2)
+            if t[y][x] == PASTO and abs(y - c_centro) > 4:
+                t[y][x] = OBJ_BRILLANTE
+                break
+
+    # Sign cerca de la entrada
+    if w > 10 and centro:
+        primer_x = min(centro.keys())
+        sign_x = 3
+        sign_y = centro.get(sign_x, h//2) - 3
+        if 0 <= sign_y < h:
+            t[sign_y][sign_x] = SIGN
+
+    # Spawn despejado
+    sx, sy = 3, 19
+    for dy in range(-2, 3):
+        for dx in range(-2, 3):
+            xx, yy = sx+dx, sy+dy
+            if 0 <= xx < w and 0 <= yy < h:
+                if t[yy][xx] in (ARBOL, PALMERA, CACTUS, ROCA, AGUA,
+                                 AGUA_OCEANO, LAGO, MONTAÑA):
+                    t[yy][xx] = PASTO
+    t[sy][sx] = CAMINO
+
+    # Borde con arboles
+    _borde_arboles(t, rng, bioma, w, h)
+    for y in Y_SALIDA:
+        t[y][0] = CAMINO; t[y][w-1] = CAMINO
+
+    return t
+def _casa(t, x0, y0, ancho=5, alto=4):
+    _rect(t, x0, y0, x0+ancho-1, y0+alto-2, TECHO)
+    _rect(t, x0, y0+alto-1, x0+ancho-1, y0+alto, EDIFICIO)
+    t[y0+alto][x0+ancho//2] = PUERTA
+    if ancho >= 4:
+        t[y0+alto][x0+1] = EDIFICIO
+        t[y0+alto][x0+ancho-2] = EDIFICIO
+
+def _construir_cueva(id_mapa, d):
+    """Genera una cueva con sala central + tuneles + salidas bien conectadas."""
+    rng = _rng(id_mapa)
+    w, h, bioma = d["w"], d["h"], d["bioma"]
+
+    # Empezar todo como pared
+    t = _vacio(w, h, CUEVA_PARED)
+
+    # Sala principal en el centro (grande para no quedar atrapado)
+    cx, cy = w // 2, h // 2
+    # Elipse grande de piso
+    _elipse(t, cx, cy, 12, 9, CUEVA_PISO)
+
+    # Pasillos hacia los bordes segun conexiones
+    conex = CONEXIONES.get(id_mapa, {})
+
+    # Pasillo hacia el OESTE
+    if "oeste" in conex:
+        for x in range(3, cx):
+            for dy in (-1, 0, 1):
+                yy = cy + dy
+                if 0 <= yy < h:
+                    t[yy][x] = CUEVA_PISO
+        # Marcar salida
+        for dy in (-1, 0, 1):
+            yy = cy + dy
+            if 0 <= yy < h:
+                t[yy][0] = TELEPORT
+                t[yy][1] = TELEPORT
+
+    # Pasillo hacia el ESTE
+    if "este" in conex:
+        for x in range(cx + 1, w - 3):
+            for dy in (-1, 0, 1):
+                yy = cy + dy
+                if 0 <= yy < h:
+                    t[yy][x] = CUEVA_PISO
+        for dy in (-1, 0, 1):
+            yy = cy + dy
+            if 0 <= yy < h:
+                t[yy][w-1] = TELEPORT
+                t[yy][w-2] = TELEPORT
+
+    # Pasillo hacia el NORTE
+    if "norte" in conex:
+        for y in range(3, cy):
+            for dx in (-1, 0, 1):
+                xx = cx + dx
+                if 0 <= xx < w:
+                    t[y][xx] = CUEVA_PISO
+        for dx in (-1, 0, 1):
+            xx = cx + dx
+            if 0 <= xx < w:
+                t[0][xx] = TELEPORT
+                t[1][xx] = TELEPORT
+
+    # Pasillo hacia el SUR
+    if "sur" in conex:
+        for y in range(cy + 1, h - 3):
+            for dx in (-1, 0, 1):
+                xx = cx + dx
+                if 0 <= xx < w:
+                    t[y][xx] = CUEVA_PISO
+        for dx in (-1, 0, 1):
+            xx = cx + dx
+            if 0 <= xx < w:
+                t[h-1][xx] = TELEPORT
+                t[h-2][xx] = TELEPORT
+
+    # Tuneles aleatorios
+    for _ in range(6):
+        tx = rng.randint(6, w-7)
+        ty = rng.randint(6, h-7)
+        direccion = rng.choice([(1,0),(-1,0),(0,1),(0,-1)])
+        for k in range(rng.randint(4, 9)):
+            xx = tx + direccion[0] * k
+            yy = ty + direccion[1] * k
+            if 3 <= xx < w-3 and 3 <= yy < h-3:
+                t[yy][xx] = CUEVA_PISO
+                if rng.random() < 0.5:
+                    if 0 <= yy+1 < h:
+                        t[yy+1][xx] = CUEVA_PISO
+
+    # Antorchas decorativas (solo en paredes junto a piso)
+    puestas = 0
+    intentos = 0
+    while puestas < 8 and intentos < 100:
+        intentos += 1
+        x = rng.randint(3, w-4)
+        y = rng.randint(3, h-4)
+        if t[y][x] == CUEVA_PARED:
+            # Verificar que tenga piso cerca
+            for dx, dy in ((-1,0),(1,0),(0,-1),(0,1)):
+                if 0 <= x+dx < w and 0 <= y+dy < h:
+                    if t[y+dy][x+dx] == CUEVA_PISO:
+                        t[y][x] = ANTORCHA
+                        puestas += 1
+                        break
+
+    # Objetos y MTs
+    for _ in range(rng.randint(2, 4)):
+        for _ in range(30):
+            x = rng.randint(5, w-6)
+            y = rng.randint(5, h-6)
+            if t[y][x] == CUEVA_PISO:
+                t[y][x] = MT_SUELO
+                break
+
+    for _ in range(rng.randint(1, 3)):
+        for _ in range(30):
+            x = rng.randint(5, w-6)
+            y = rng.randint(5, h-6)
+            if t[y][x] == CUEVA_PISO:
+                t[y][x] = OBJ_BRILLANTE
+                break
+
+    # Asegurar spawn valido en el centro
+    if t[cy][cx] != CUEVA_PISO:
+        t[cy][cx] = CUEVA_PISO
+    # Limpiar area 3x3 alrededor del spawn
+    for dy in range(-1, 2):
+        for dx in range(-1, 2):
+            xx, yy = cx + dx, cy + dy
+            if 0 <= xx < w and 0 <= yy < h:
+                if t[yy][xx] not in (CUEVA_PISO, ANTORCHA, MT_SUELO, OBJ_BRILLANTE, TELEPORT):
+                    t[yy][xx] = CUEVA_PISO
+
+    return t
+
+def _construir_pueblo(id_mapa, d):
+    rng = _rng(id_mapa)
+    w, h, bioma = d["w"], d["h"], d["bioma"]
+    t = _vacio(w, h, PASTO)
+
+    for y in range(h):
+        for x in range(w):
+            if rng.random() < .08:
+                t[y][x] = FLORES if rng.random() < 0.35 else PASTO
+
+    # Avenida principal
+    _rect(t, 0, h//2-1, w-1, h//2+1, CAMINO)
+    _rect(t, w//2-1, h//2-6, w//2+1, h//2+6, CAMINO)
+    _rect(t, 12, h//2, 14, h//2+8, CAMINO)
+    _rect(t, w-14, h//2, w-12, h//2+8, CAMINO)
+    _rect(t, 12, h//2+8, w-12, h//2+9, CAMINO)
+
+    if id_mapa == "caleta_norte":
+        _rect(t, 0, h-8, w-1, h-1, AGUA_OCEANO)
+        _rect(t, 0, h-10, w-1, h-9, ARENA_PLAYA)
+        _rect(t, 15, h-12, 17, h-9, CAMINO)
+        _rect(t, w-16, h-12, w-14, h-9, CAMINO)
+        for (px, py) in [(6, h-14), (14, h-13), (w-8, h-14), (w-16, h-13),
+                          (26, h-14), (34, h-14)]:
+            t[py][px] = PALMERA
+        _casa(t, 6, 8, 8, 6)
+        _rect(t, 3, 7, 7, 12, TECHO); _rect(t, 3, 13, 7, 13, EDIFICIO); t[13][5] = PUERTA
+        _rect(t, 5, 14, 5, h//2, CAMINO)
+        _casa(t, w-16, 8, 8, 6)
+        _casa(t, w-16, h-22, 8, 6)
+        _casa(t, 6, h-22, 8, 6)
+        _casa(t, w//2-4, 8, 8, 6)
+        _elipse(t, w//2, h//2+2, 5, 3, CAMINO)
+        _elipse(t, w//2, h//2+2, 3, 2, AGUA)
+        for (fx, fy) in [(10, h//2-2), (14, h//2+6), (w-10, h//2-2), (w-14, h//2+6)]:
+            if t[fy][fx] == PASTO: t[fy][fx] = FLORES
+    else:
+        if d.get("mar") or d.get("lago") or d.get("rio"):
+            if d.get("rio"):
+                _rect(t, 0, h-10, w-1, h-7, AGUA)
+                _rect(t, w//2-1, h-10, w//2+1, h-7, PUENTE)
+                for y in range(h-6, h):
+                    for x in range(w):
+                        t[y][x] = PASTO if rng.random() > .2 else FLORES
+            else:
+                _rect(t, 0, h-10, w-1, h-10, ARENA_PLAYA)
+                _rect(t, 0, h-9, w-1, h-1, AGUA_OCEANO if d.get("mar") else LAGO)
+                _rect(t, w//2-1, h-14, w//2+1, h-8, CAMINO)
+
+        casas = [(8, 8, 7, 5), (20, 6, 7, 5), (w-18, 8, 7, 5),
+                 (8, h-20, 7, 5), (w-18, h-20, 7, 5)]
+        for (cx0, cy0, cw, ch) in casas:
+            _casa(t, cx0, cy0, cw, ch)
+            px = cx0 + cw//2
+            py = cy0 + ch
+            if py < h//2 - 1:
+                _rect(t, px, py+1, px, h//2 - 2, CAMINO)
+            else:
+                _rect(t, px, h//2 + 2, px, py-1, CAMINO)
+
+    # Gimnasio
+    if id_mapa in GIMNASIO_POS:
+        gx, gy = GIMNASIO_POS[id_mapa]
+        _rect(t, gx-5, gy-5, gx+5, gy-3, TECHO)
+        _rect(t, gx-5, gy-2, gx+5, gy, EDIFICIO)
+        t[gy][gx] = PUERTA
+        t[gy][gx-6] = SIGN
+        t[gy][gx+6] = SIGN
+        _rect(t, gx, gy+1, gx, h//2+1, CAMINO)
+
+    # Tambo
+    if id_mapa in TAMBO_POS:
+        tb_x, tb_y = TAMBO_POS[id_mapa]
+        _rect(t, tb_x-3, tb_y-4, tb_x+3, tb_y-2, TECHO)
+        _rect(t, tb_x-3, tb_y-1, tb_x+3, tb_y, EDIFICIO)
+        t[tb_y][tb_x] = PUERTA
+        _rect(t, tb_x, h//2+2, tb_x, tb_y-1, CAMINO)
+        t[tb_y][tb_x-4] = SIGN_INFO
+
+    # Tienda
+    if id_mapa in TIENDA_POS:
+        td_x, td_y = TIENDA_POS[id_mapa]
+        _rect(t, td_x-3, td_y-4, td_x+3, td_y-2, TECHO)
+        _rect(t, td_x-3, td_y-1, td_x+3, td_y, EDIFICIO)
+        t[td_y][td_x] = PUERTA
+        _rect(t, td_x, h//2+2, td_x, td_y-1, CAMINO)
+        t[td_y][td_x+4] = SIGN_INFO
+
+    # Decoracion ORGANICA por bioma (validada)
+    # Solo en tiles de pasto libres
+    def zona_libre(x, y):
+        if not (0 <= x < w and 0 <= y < h):
+            return False
+        if t[y][x] not in (PASTO,):
+            return False
+        # No pegado a edificios/puertas/camino
+        for dy in range(-1, 2):
+            for dx in range(-1, 2):
+                xx, yy = x+dx, y+dy
+                if 0 <= xx < w and 0 <= yy < h:
+                    if t[yy][xx] in (CAMINO, PUERTA, TECHO, EDIFICIO, SIGN,
+                                     SIGN_INFO, AGUA, AGUA_OCEANO, LAGO):
+                        return False
+        return True
+
+    def cluster_pueblo(tile, cx, cy, n, radio=2, req=0.3):
+        colocado = 0
+        intentos = 0
+        while colocado < n and intentos < n * 15:
+            intentos += 1
+            ang = rng.uniform(0, 2 * math.pi)
+            r = rng.uniform(0, radio)
+            x = int(cx + math.cos(ang) * r)
+            y = int(cy + math.sin(ang) * r)
+            if not zona_libre(x, y):
+                continue
+            if rng.random() < req:
+                vecinos = 0
+                for vy in (-1, 0, 1):
+                    for vx in (-1, 0, 1):
+                        if vx == 0 and vy == 0:
+                            continue
+                        xx, yy = x+vx, y+vy
+                        if 0 <= xx < w and 0 <= yy < h and t[yy][xx] == tile:
+                            vecinos += 1
+                if vecinos == 0:
+                    continue
+            t[y][x] = tile
+            colocado += 1
+
+    # Aplicar decoracion por bioma
+    if bioma == "costa":
+        for _ in range(6):
+            cluster_pueblo(PALMERA, rng.randint(5, w-6), rng.randint(5, h-6),
+                           rng.randint(2, 4), 2, 0.5)
+        for _ in range(8):
+            cluster_pueblo(ARENA_CLARA, rng.randint(5, w-6), rng.randint(5, h-6),
+                           rng.randint(3, 6), 2, 0.3)
+    elif bioma == "valle":
+        for _ in range(10):
+            cluster_pueblo(FLORES, rng.randint(5, w-6), rng.randint(5, h-6),
+                           rng.randint(3, 6), 2, 0.4)
+        # Parches rectangulares de hierba alta estilo Emerald
+        for _ in range(4):
+            px = rng.randint(5, w - 10)
+            py = rng.randint(5, h - 8)
+            pw = rng.randint(4, 7)
+            ph = rng.randint(3, 4)
+            libre = True
+            for yy in range(py, min(py + ph, h)):
+                for xx in range(px, min(px + pw, w)):
+                    if t[yy][xx] not in (PASTO, FLORES):
+                        libre = False
+                        break
+                if not libre:
+                    break
+            if libre:
+                for yy in range(py, min(py + ph, h)):
+                    for xx in range(px, min(px + pw, w)):
+                        es_borde = (xx == px or xx == px + pw - 1 or
+                                    yy == py or yy == py + ph - 1)
+                        if es_borde and rng.random() < 0.35:
+                            continue
+                        if t[yy][xx] in (PASTO, FLORES):
+                            t[yy][xx] = HIERBA_ALTA
+    elif bioma == "sierra":
+        for _ in range(8):
+            cluster_pueblo(ROCA, rng.randint(5, w-6), rng.randint(5, h-6),
+                           rng.randint(2, 4), 2, 0.4)
+    elif bioma == "paramo":
+        for _ in range(10):
+            cluster_pueblo(NIEVE, rng.randint(5, w-6), rng.randint(5, h-6),
+                           rng.randint(4, 8), 3, 0.3)
+    elif bioma == "selva":
+        for _ in range(12):
+            cluster_pueblo(ARBOL, rng.randint(5, w-6), rng.randint(5, h-6),
+                           rng.randint(3, 6), 3, 0.4)
+    elif bioma == "capital":
+        for _ in range(6):
+            cluster_pueblo(FLORES, rng.randint(5, w-6), rng.randint(5, h-6),
+                           rng.randint(3, 6), 2, 0.3)
+
+    # Borde con arboles
+    arb = {"costa": PALMERA, "selva": ARBOL, "sierra": CACTUS}.get(bioma, ARBOL)
+    for y in range(h):
+        for x in range(w):
+            if (x in (0, w-1) and y not in Y_SALIDA) or y < 3:
+                if t[y][x] != AGUA_OCEANO and t[y][x] != LAGO:
+                    t[y][x] = arb if rng.random() < .9 else PASTO
+    for y in Y_SALIDA:
+        t[y][0] = CAMINO; t[y][w-1] = CAMINO
+        t[y][1] = CAMINO; t[y][w-2] = CAMINO
+
+    # Post-proceso: crear caminos accesibles a puertas
+    for y in range(h):
+        for x in range(w):
+            if t[y][x] == PUERTA:
+                for dy_ in (1, 2):
+                    yy = y + dy_
+                    if yy < h and t[yy][x] in (PASTO, FLORES, ARENA_CLARA,
+                                                ARBOL, PALMERA, CACTUS, ROCA,
+                                                HIERBA_ALTA, FLOR_AMARILLA, FLOR_ROJA):
+                        t[yy][x] = CAMINO
+
+    # Asegurar acceso a Tambo/Tienda/Gym
+    for pos_dict in (TAMBO_POS, TIENDA_POS, GIMNASIO_POS):
+        pos = pos_dict.get(id_mapa)
+        if pos:
+            px, py = pos
+            if 0 <= py < h and 0 <= px < w:
+                if t[py][px] not in (PUERTA,):
+                    t[py][px] = PUERTA
+            for dy_ in (1, 2, 3):
+                yy = py + dy_
+                if 0 <= yy < h and t[yy][px] not in (AGUA, AGUA_OCEANO, LAGO, MONTAÑA):
+                    if dy_ <= 2 or t[yy][px] in (ARBOL, PALMERA, CACTUS):
+                        t[yy][px] = CAMINO
+
+    # Spawn despejado
+    if id_mapa == "caleta_norte":
+        sx, sy = 5, 15
+    else:
+        sx, sy = 3, 19
+    for dy in range(-2, 3):
+        for dx in range(-2, 3):
+            xx, yy = sx+dx, sy+dy
+            if 0 <= xx < w and 0 <= yy < h:
+                if t[yy][xx] in (ARBOL, PALMERA, CACTUS, ROCA, AGUA,
+                                 AGUA_OCEANO, LAGO, MONTAÑA):
+                    t[yy][xx] = PASTO
+    t[sy][sx] = CAMINO
+
+    return t
+def _decorar_bioma(t, w, h, bioma, rng):
+    """Coloca decoracion con REGLAS ESTRICTAS - no sobre caminos/edificios/agua."""
+    # Tiles "sagrados": NUNCA poner decoracion sobre estos
+    PROTEGIDOS = {CAMINO, PUERTA, TECHO, EDIFICIO, MURO_GYM, AGUA,
+                  AGUA_PROF, AGUA_OCEANO, LAGO, CASCADA, PUENTE,
+                  SIGN, SIGN_INFO, MT_SUELO, OBJ_BRILLANTE, TELEPORT,
+                  LEDGE, ACANTILADO, MONTAÑA, ROCA_ESCALABLE, CUEVA_PISO,
+                  CUEVA_PARED, CUEVA_OSCURA, ANTORCHA, NIEVE_PROF}
+    # Tiles "base" donde si podemos decorar
+    BASE_VALIDA = {PASTO, HIERBA_ALTA, FLORES, ARENA, ARENA_CLARA, ARENA_OSCURA,
+                   NIEVE, TIERRA, DUNA, FLOR_AMARILLA, FLOR_ROJA, PIEDRA_SAGRADA}
+
+    def puede_colocar(x, y, tile_actual=None):
+        if not (0 <= x < w and 0 <= y < h):
+            return False
+        actual = tile_actual if tile_actual is not None else t[y][x]
+        if actual in PROTEGIDOS:
+            return False
+        if actual not in BASE_VALIDA:
+            return False
+        return True
+
+    def hay_camino_cerca(x, y, radio=1):
+        for dy in range(-radio, radio+1):
+            for dx in range(-radio, radio+1):
+                xx, yy = x+dx, y+dy
+                if 0 <= xx < w and 0 <= yy < h:
+                    if t[yy][xx] in (CAMINO, PUERTA, SIGN, SIGN_INFO):
+                        return True
+        return False
+
+    def colocar_cluster(tile, cx, cy, n, radio=3, requiere_par=0):
+        """Coloca n tiles del tipo tile alrededor de (cx,cy)."""
+        colocados = 0
+        intentos = 0
+        while colocados < n and intentos < n * 15:
+            intentos += 1
+            dx = rng.randint(-radio, radio)
+            dy = rng.randint(-radio, radio)
+            x, y = cx+dx, cy+dy
+            if not puede_colocar(x, y):
+                continue
+            if rng.random() < requiere_par:
+                # Requiere al menos un vecino del mismo tipo
+                vecinos = 0
+                for vy in (-1, 0, 1):
+                    for vx in (-1, 0, 1):
+                        if vx == 0 and vy == 0:
+                            continue
+                        xx, yy = x+vx, y+vy
+                        if 0 <= xx < w and 0 <= yy < h and t[yy][xx] == tile:
+                            vecinos += 1
+                if vecinos == 0:
+                    continue
+            t[y][x] = tile
+            colocados += 1
+
+    # --- COSTA ---
+    if bioma == "costa":
+        # Palmeras: clusters de 3-6, cerca del mar/arena
+        for _ in range(8):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(PALMERA, cx, cy, rng.randint(2, 4), 2, 0.5)
+        # Arena clara: parches amplios
+        for _ in range(12):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(ARENA_CLARA, cx, cy, rng.randint(4, 8), 3, 0.3)
+        # Cactus ocasionales
+        for _ in range(4):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(CACTUS, cx, cy, 2, 2, 0.5)
+
+    # --- VALLE ---
+    elif bioma == "valle":
+        # Flores: clusters medianos
+        for _ in range(15):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(FLORES, cx, cy, rng.randint(3, 6), 2, 0.4)
+        # Hierba alta: parches amplios cerca de la ruta
+        for _ in range(10):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(HIERBA_ALTA, cx, cy, rng.randint(4, 8), 3, 0.3)
+        # Flores amarillas y rojas sueltas
+        for _ in range(6):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(FLOR_AMARILLA, cx, cy, rng.randint(2, 4), 2, 0.5)
+        for _ in range(4):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(FLOR_ROJA, cx, cy, rng.randint(2, 4), 2, 0.5)
+
+    # --- SIERRA ---
+    elif bioma == "sierra":
+        # Rocas: clusters medianos, NUNCA en camino
+        for _ in range(12):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(ROCA, cx, cy, rng.randint(2, 5), 3, 0.4)
+        # Cactus: grupos pequeños
+        for _ in range(5):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(CACTUS, cx, cy, 2, 2, 0.5)
+        # Piedra sagrada: sitios específicos
+        for _ in range(4):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(PIEDRA_SAGRADA, cx, cy, 1, 1, 0)
+
+    # --- PARAMO ---
+    elif bioma == "paramo":
+        # Nieve: parches grandes
+        for _ in range(18):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(NIEVE, cx, cy, rng.randint(6, 12), 4, 0.2)
+        # Nieve profunda (con hierba alta) agrupada
+        for _ in range(8):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(NIEVE_PROF, cx, cy, rng.randint(3, 6), 2, 0.4)
+
+    # --- ALTIPLANO ---
+    elif bioma == "altiplano":
+        for _ in range(15):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(FLOR_AMARILLA, cx, cy, rng.randint(3, 6), 3, 0.3)
+        for _ in range(6):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(ARENA_CLARA, cx, cy, rng.randint(3, 6), 3, 0.3)
+
+    # --- SELVA ---
+    elif bioma == "selva":
+        # Árboles: clusters densos pero evitando el camino
+        for _ in range(20):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            if hay_camino_cerca(cx, cy, 1):
+                continue
+            colocar_cluster(ARBOL, cx, cy, rng.randint(4, 8), 3, 0.4)
+        # Arbustos cortables: clusters medianos
+        for _ in range(8):
+            cx = rng.randint(4, w-5)
+            cy = rng.randint(4, h-5)
+            colocar_cluster(ARBUSTO_CORTABLE, cx, cy, rng.randint(2, 4), 3, 0.5)
+        # Hierba alta: parches grandes
+        for _ in range(12):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(HIERBA_ALTA, cx, cy, rng.randint(5, 10), 3, 0.3)
+
+    # --- CAPITAL ---
+    elif bioma == "capital":
+        for _ in range(8):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(FLORES, cx, cy, rng.randint(3, 6), 2, 0.3)
+        for _ in range(6):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            colocar_cluster(FLOR_ROJA, cx, cy, rng.randint(2, 4), 2, 0.4)
+        # Árboles ornamentales
+        for _ in range(6):
+            cx = rng.randint(3, w-4)
+            cy = rng.randint(3, h-4)
+            if hay_camino_cerca(cx, cy, 1):
+                continue
+            colocar_cluster(ARBOL, cx, cy, 2, 2, 0.5)
+
+def _construir(id_mapa):
+    d = DEFINICIONES.get(id_mapa)
+    if d is None:
+        d = {"tipo": "ruta", "bioma": "valle", "w": 60, "h": 40, "pasto": .2}
+    if d["tipo"] == "ruta":
+        return _construir_ruta(id_mapa, d)
+    if d["tipo"] == "cueva":
+        return _construir_cueva(id_mapa, d)
+    return _construir_pueblo(id_mapa, d)
+
+# GRAFO DE CONEXIONES: cada mapa puede conectar a varios mapas en diferentes direcciones
+# (destino, lado_origen) donde lado_origen es: izq, der, arriba, abajo
+# GRAFO DE CONEXIONES: progresión en ZIGZAG
+# Cada mapa tiene entrada y salida en direcciones diferentes
+# para evitar el "siempre hacia la derecha"
+CONEXIONES = {
+    # ===== FASE COSTA =====
+    # Caleta Norte -> sale hacia ARRIBA (norte)
+    "caleta_norte":    {"norte": "ruta_1"},
+
+    # Ruta 1: entra por ABAJO, sale por ARRIBA
+    "ruta_1":          {"sur": "caleta_norte", "norte": "ciudad_moche",
+                        "este": "cueva_costera"},
+
+    # Ciudad Moche (Gimnasio 1): entra por ABAJO, sale por la DERECHA
+    "ciudad_moche":    {"sur": "ruta_1", "este": "ruta_2"},
+
+    # Ruta 2: entra por IZQUIERDA, sale por ARRIBA
+    "ruta_2":          {"oeste": "ciudad_moche", "norte": "puerto_ancon",
+                        "este": "cueva_marina"},
+
+    # Puerto Ancon (Gimnasio 2): entra por ABAJO, sale por la IZQUIERDA
+    "puerto_ancon":    {"sur": "ruta_2", "oeste": "ruta_3"},
+
+    # Ruta 3: entra por DERECHA, sale por ARRIBA
+    "ruta_3":          {"este": "puerto_ancon", "norte": "andahuaylas"},
+
+    # Andahuaylas (Gimnasio 3): entra por ABAJO, sale por la IZQUIERDA
+    "andahuaylas":     {"sur": "ruta_3", "oeste": "ruta_4"},
+
+    # Ruta 4: entra por DERECHA, sale por el NORTE
+    "ruta_4":          {"este": "andahuaylas", "norte": "ciudad_imperial"},
+
+    # Ciudad Imperial (Gimnasio 4): entra por ABAJO, sale por el NORTE
+    "ciudad_imperial": {"sur": "ruta_4", "norte": "ruta_5"},
+
+    # ===== FASE SIERRA ALTA =====
+    # Ruta 5: entra por ABAJO, sale por la IZQUIERDA
+    "ruta_5":          {"sur": "ciudad_imperial", "oeste": "puno"},
+
+    # Puno (Gimnasio 5): entra por la DERECHA, sale por el NORTE
+    "puno":            {"este": "ruta_5", "norte": "ruta_6"},
+
+    # Ruta 6: entra por ABAJO, sale por la IZQUIERDA
+    "ruta_6":          {"sur": "puno", "oeste": "huaraz"},
+
+    # Huaraz (Gimnasio 6): entra por la DERECHA, sale por el SUR
+    "huaraz":          {"este": "ruta_6", "sur": "ruta_7"},
+
+    # ===== FASE SELVA =====
+    # Ruta 7: entra por ARRIBA, sale por la IZQUIERDA
+    "ruta_7":          {"norte": "huaraz", "oeste": "puerto_selva"},
+
+    # Puerto Selva (Gimnasio 7): entra por la DERECHA, sale por el SUR
+    "puerto_selva":    {"este": "ruta_7", "sur": "ruta_8"},
+
+    # Ruta 8: entra por ARRIBA, sale por la IZQUIERDA
+    "ruta_8":          {"norte": "puerto_selva", "oeste": "ciudad_capital"},
+
+    # Ciudad Capital (Gimnasio 8): entra por la DERECHA, fin
+    "ciudad_capital":  {"este": "ruta_8"},
+
+    # ===== CUEVAS (atajos opcionales) =====
+    "cueva_costera":   {"oeste": "ruta_1", "este": "ruta_3"},
+    "cueva_marina":    {"oeste": "ruta_2", "este": "puerto_ancon"},
+}
+
+
+def _transiciones(id_mapa):
+    """Transiciones basadas en CONEXIONES (grafo real)."""
+    tr = {}
+    if id_mapa not in CONEXIONES:
+        return tr
+
+    conex = CONEXIONES[id_mapa]
+    d_actual = DEFINICIONES.get(id_mapa, {})
+    w = d_actual.get("w", 60)
+    h = d_actual.get("h", 40)
+
+    # SALIDA ESTE (borde derecho, sale por x=w-1)
+    if "este" in conex:
+        dest = conex["este"]
+        dw = DEFINICIONES.get(dest, {}).get("w", 60)
+        # Usar un rango mas amplio de Y (no solo 18-21)
+        for y in range(h // 2 - 4, h // 2 + 5):
+            if 0 <= y < h:
+                tr[(w - 1, y)] = (dest, 2, y)
+                tr[(w - 2, y)] = (dest, 2, y)
+
+    # SALIDA OESTE (borde izquierdo, sale por x=0)
+    if "oeste" in conex:
+        dest = conex["oeste"]
+        dw = DEFINICIONES.get(dest, {}).get("w", 60)
+        for y in range(h // 2 - 4, h // 2 + 5):
+            if 0 <= y < h:
+                tr[(0, y)] = (dest, dw - 3, y)
+                tr[(1, y)] = (dest, dw - 3, y)
+
+    # SALIDA NORTE (borde superior, sale por y=0)
+    if "norte" in conex:
+        dest = conex["norte"]
+        dh = DEFINICIONES.get(dest, {}).get("h", 40)
+        # Rango amplio de X en el centro
+        for x in range(w // 2 - 5, w // 2 + 6):
+            if 0 <= x < w:
+                tr[(x, 0)] = (dest, x, dh - 3)
+                tr[(x, 1)] = (dest, x, dh - 3)
+
+    # SALIDA SUR (borde inferior, sale por y=h-1)
+    if "sur" in conex:
+        dest = conex["sur"]
+        dh = DEFINICIONES.get(dest, {}).get("h", 40)
+        for x in range(w // 2 - 5, w // 2 + 6):
+            if 0 <= x < w:
+                tr[(x, h - 1)] = (dest, x, 2)
+                tr[(x, h - 2)] = (dest, x, 2)
+
+    return tr
+
+class MapaVisual:
+    def __init__(self, id_mapa):
+        self.id = id_mapa
+        d = DEFINICIONES.get(id_mapa, {"bioma": "valle"})
+        self.bioma = d["bioma"]
+        self.tiles = _construir(id_mapa)
+        self.alto = len(self.tiles)
+        self.ancho = len(self.tiles[0])
+        self.transiciones = _transiciones(id_mapa)
+
+        # Determinar spawn segun tipo de mapa
+        if id_mapa == "caleta_norte":
+            self.pos_x, self.pos_y = 5.0, 15.0
+        elif id_mapa in CONEXIONES and id_mapa.startswith("cueva_"):
+            # CUEVAS: spawn en el centro
+            self.pos_x = float(self.ancho // 2)
+            self.pos_y = float(self.alto // 2)
+        elif id_mapa == "cumbre_niebla":
+            self.pos_x = float(self.ancho // 2)
+            self.pos_y = float(self.alto // 2)
+        else:
+            self.pos_x, self.pos_y = 3.0, 19.0
+
+        # Validar que el spawn este en un tile caminable
+        sx, sy = int(self.pos_x), int(self.pos_y)
+        if 0 <= sx < self.ancho and 0 <= sy < self.alto:
+            if self.tiles[sy][sx] not in CAMINABLES:
+                # Buscar tile caminable cercano
+                encontrado = False
+                for radio in range(1, 20):
+                    for dy in range(-radio, radio+1):
+                        for dx in range(-radio, radio+1):
+                            if max(abs(dx), abs(dy)) != radio:
+                                continue
+                            nx, ny = sx + dx, sy + dy
+                            if 0 <= nx < self.ancho and 0 <= ny < self.alto:
+                                if self.tiles[ny][nx] in CAMINABLES:
+                                    self.pos_x, self.pos_y = float(nx), float(ny)
+                                    encontrado = True
+                                    break
+                        if encontrado: break
+                    if encontrado: break
+        self.destino_x, self.destino_y = int(self.pos_x), int(self.pos_y)
+        self.moviendo = False
+        self.direccion = "abajo"
+        self.anim_pasos = 0.0
+        self.anim_agua = 0.0
+        self.anim_global = 0.0
+        self.salto_pendiente = None
+
+        self.zonas_hierba = {(x, y) for y in range(self.alto) for x in range(self.ancho)
+                             if self.tiles[y][x] in ENCUENTRO}
+        # Zonas de cueva (encuentros dentro de cuevas)
+        self.zonas_cueva = {(x, y) for y in range(self.alto) for x in range(self.ancho)
+                            if self.tiles[y][x] in ENCUENTRO_CUEVA}
+        # Zonas de cueva (encuentros dentro de cuevas)
+        self.zonas_cueva = {(x, y) for y in range(self.alto) for x in range(self.ancho)
+                            if self.tiles[y][x] in ENCUENTRO_CUEVA}
+        self._var = [[(x*7 + y*13) % 5 for x in range(self.ancho)]
+                     for y in range(self.alto)]
+        self._escala_jugador = {}
+        # FIX: post-procesamiento para limpiar decoracion en lugares invalidos
+        try:
+            self._limpiar_decoracion_invalida()
+        except Exception as e:
+            print(f"WARN limpiar decoracion: {e}")
+        # FIX: eliminar lineas horizontales de hierba
+        try:
+            self._romper_lineas_rectas()
+        except Exception as e:
+            print(f"WARN romper lineas: {e}")
+        # FIX: garantizar hierba alta en rutas
+        try:
+            self._garantizar_hierba_alta()
+        except Exception as e:
+            print(f"WARN garantizar hierba: {e}")
+        # FIX QUIRURGICO: garantizar camino a los bordes con conexion
+        try:
+            self._garantizar_caminos_borde()
+        except Exception as e:
+            print(f"WARN garantizar caminos: {e}")
+
+    def _limpiar_decoracion_invalida(self):
+        """FIX: elimina tiles decorativos pegados o encima de estructuras."""
+        PROTEGIDOS = {PUERTA, TECHO, EDIFICIO, MURO_GYM, CAMINO, SIGN, SIGN_INFO,
+                      AGUA, AGUA_PROF, AGUA_OCEANO, LAGO, CASCADA, PUENTE,
+                      MT_SUELO, OBJ_BRILLANTE, TELEPORT, LEDGE, ACANTILADO,
+                      MONTAÑA, ROCA_ESCALABLE, CUEVA_PISO, CUEVA_PARED,
+                      CUEVA_OSCURA, ANTORCHA}
+        DECORATIVOS = {ARBOL, PALMERA, CACTUS, ROCA, ARBUSTO_CORTABLE, ARBUSTO,
+                       FLORES, FLOR_AMARILLA, FLOR_ROJA, HIERBA_ALTA, NIEVE_PROF,
+                       PIEDRA_SAGRADA}
+        # Revisar cada tile decorativo y verificar que no este pegado a algo protegido
+        for y in range(self.alto):
+            for x in range(self.ancho):
+                t = self.tiles[y][x]
+                if t not in DECORATIVOS:
+                    continue
+                # Si es ARBOL/PALMERA/CACTUS/ROCA, no debe estar pegado a puertas/edificios
+                if t in (ARBOL, PALMERA, CACTUS, ROCA):
+                    cerca_edificio = False
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            xx, yy = x+dx, y+dy
+                            if 0 <= xx < self.ancho and 0 <= yy < self.alto:
+                                if self.tiles[yy][xx] in (PUERTA, TECHO, EDIFICIO, MURO_GYM):
+                                    cerca_edificio = True
+                                    break
+                        if cerca_edificio:
+                            break
+                    if cerca_edificio:
+                        # Reemplazar por pasto/nieve/arena segun bioma
+                        if self.bioma == "paramo":
+                            self.tiles[y][x] = NIEVE
+                        elif self.bioma == "costa":
+                            self.tiles[y][x] = ARENA_CLARA
+                        else:
+                            self.tiles[y][x] = PASTO
+
+    def _garantizar_hierba_alta(self):
+        """Asegura que haya hierba alta suficiente en el mapa."""
+        # Solo aplicar a rutas y pueblos (no a interiores)
+        if self.id not in DEFINICIONES:
+            return
+        tipo = DEFINICIONES[self.id].get("tipo", "ruta")
+        if tipo not in ("ruta", "pueblo"):
+            return
+
+        # Elegir tile de hierba segun bioma
+        if self.bioma == "paramo":
+            tile_hierba = NIEVE_PROF
+        else:
+            tile_hierba = HIERBA_ALTA
+
+        # Contar cuanta hierba hay actualmente
+        cantidad_actual = sum(
+            1 for y in range(self.alto) for x in range(self.ancho)
+            if self.tiles[y][x] == tile_hierba
+        )
+
+        # Objetivo minimo segun tipo
+        min_objetivo = 80 if tipo == "ruta" else 30
+        if cantidad_actual >= min_objetivo:
+            return
+
+        # Agregar parches rectangulares
+        import random as _r
+        rng = _r.Random(hash(self.id) & 0xFFFFFFFF)
+        intentos = 0
+        max_intentos = 500
+        colocados = 0
+        objetivo = max(0, min_objetivo - cantidad_actual)
+
+        while colocados < objetivo and intentos < max_intentos:
+            intentos += 1
+            px = rng.randint(3, self.ancho - 8)
+            py = rng.randint(3, self.alto - 6)
+            pw = rng.randint(3, 6)
+            ph = rng.randint(2, 4)
+            # Verificar zona libre
+            libre = True
+            for yy in range(py, min(py + ph, self.alto)):
+                for xx in range(px, min(px + pw, self.ancho)):
+                    if self.tiles[yy][xx] not in (PASTO, FLORES, FLOR_AMARILLA, FLOR_ROJA):
+                        libre = False
+                        break
+                if not libre:
+                    break
+            if not libre:
+                continue
+            # Colocar el parche con bordes irregulares
+            for yy in range(py, min(py + ph, self.alto)):
+                for xx in range(px, min(px + pw, self.ancho)):
+                    es_borde = (xx == px or xx == px + pw - 1 or
+                                yy == py or yy == py + ph - 1)
+                    if es_borde and rng.random() < 0.35:
+                        continue
+                    if self.tiles[yy][xx] in (PASTO, FLORES, FLOR_AMARILLA, FLOR_ROJA):
+                        self.tiles[yy][xx] = tile_hierba
+                        colocados += 1
+
+        # Actualizar zonas_hierba
+        self.zonas_hierba = {(x, y) for y in range(self.alto) for x in range(self.ancho)
+                             if self.tiles[y][x] in ENCUENTRO}
+
+    def _romper_lineas_rectas(self):
+        """FIX: elimina hierba alta que forma lineas horizontales perfectas."""
+        HIERBAS = {HIERBA_ALTA, NIEVE_PROF}
+        # Detectar y romper lineas horizontales
+        for y in range(self.alto):
+            col = 0
+            for x in range(self.ancho):
+                if self.tiles[y][x] in HIERBAS:
+                    col += 1
+                else:
+                    if col >= 5:
+                        # Era una linea larga: romper aleatoriamente
+                        import random as _r
+                        _r.seed(x * 13 + y * 7)
+                        for xx in range(x - col, x):
+                            if _r.random() < 0.5:
+                                if self.bioma == "paramo":
+                                    self.tiles[y][xx] = NIEVE
+                                else:
+                                    self.tiles[y][xx] = PASTO
+                    col = 0
+            # Ultima columna
+            if col >= 5:
+                import random as _r
+                _r.seed(y * 13)
+                for xx in range(self.ancho - col, self.ancho):
+                    if _r.random() < 0.5:
+                        if self.bioma == "paramo":
+                            self.tiles[y][xx] = NIEVE
+                        else:
+                            self.tiles[y][xx] = PASTO
+        # FIX: post-procesamiento para limpiar decoracion en lugares invalidos
+        try:
+            self._limpiar_decoracion_invalida()
+        except Exception as e:
+            print(f"WARN limpiar decoracion: {e}")
+        # FIX: eliminar lineas horizontales de hierba
+        try:
+            self._romper_lineas_rectas()
+        except Exception as e:
+            print(f"WARN romper lineas: {e}")
+
+    def _caminable(self, x, y, mo_activas=None):
+        if not (0 <= x < self.ancho and 0 <= y < self.alto):
+            return False
+        tile = self.tiles[y][x]
+        if tile not in CAMINABLES:
+            return False
+        # Verifica MO si requiere
+        if tile in MO_REQUERIDA:
+            mo = MO_REQUERIDA[tile]
+            if mo_activas is None or mo not in mo_activas:
+                return False
+        return True
+
+    def iniciar_movimiento(self, dx, dy, direccion, mo_activas=None):
+        self.direccion = direccion
+        if self.moviendo: return False, None
+        nx, ny = self.destino_x + dx, self.destino_y + dy
+        if (0 <= ny < self.alto and 0 <= nx < self.ancho
+                and self.tiles[ny][nx] == LEDGE and dy == 1):
+            ny2 = ny + 1
+            if self._caminable(nx, ny2, mo_activas):
+                self.destino_x, self.destino_y = nx, ny2
+                self.moviendo = True
+                self.salto_pendiente = True
+                return True, None
+        if not self._caminable(nx, ny, mo_activas):
+            return False, None
+        self.destino_x, self.destino_y = nx, ny
+        self.moviendo = True
+        return True, self.transiciones.get((nx, ny))
+
+    def actualizar(self, dt, velocidad=7.0):
+        self.anim_global += dt
+        self.anim_agua += dt * 3.5
+        if not self.moviendo: return
+        paso = velocidad * dt
+        if self.salto_pendiente: paso *= 1.6
+        dx = self.destino_x - self.pos_x
+        dy = self.destino_y - self.pos_y
+        dist = math.hypot(dx, dy)
+        self.anim_pasos += paso
+        if dist <= paso:
+            self.pos_x, self.pos_y = float(self.destino_x), float(self.destino_y)
+            self.moviendo = False; self.salto_pendiente = False
+        else:
+            self.pos_x += dx/dist*paso; self.pos_y += dy/dist*paso
+
+    def esta_en_hierba_alta(self):
+        return (self.destino_x, self.destino_y) in self.zonas_hierba
+
+    def esta_en_cueva_piso(self):
+        return (self.destino_x, self.destino_y) in getattr(self, "zonas_cueva", set())
+
+    def esta_en_cueva_piso(self):
+        return (self.destino_x, self.destino_y) in getattr(self, "zonas_cueva", set())
+
+    def tile_en_pixel(self):
+        return self.pos_x * TILE_SIZE, self.pos_y * TILE_SIZE
+
+    def tile_enfrente(self):
+        """Devuelve el tile (tipo, x, y) que está justo al frente del jugador."""
+        d = self.direccion
+        x, y = self.destino_x, self.destino_y
+        if d == "arriba": y -= 1
+        elif d == "abajo": y += 1
+        elif d == "izquierda": x -= 1
+        elif d == "derecha": x += 1
+        if 0 <= x < self.ancho and 0 <= y < self.alto:
+            return self.tiles[y][x], x, y
+        return None, x, y
+
+    def romper_tile(self, x, y):
+        """Rompe/elimina un tile (para MO Corte, Golpe Roca)."""
+        if not (0 <= x < self.ancho and 0 <= y < self.alto): return False
+        tipo = self.tiles[y][x]
+        if tipo in (ARBUSTO_CORTABLE, ROCA_ROMPIBLE):
+            self.tiles[y][x] = CAMINO
+            return True
+        return False
+
+    def dibujar(self, pantalla, cam_x, cam_y):
+        sw, sh = pantalla.get_size()
+        x0 = max(0, cam_x // TILE_SIZE)
+        y0 = max(0, cam_y // TILE_SIZE)
+        x1 = min(self.ancho, (cam_x + sw) // TILE_SIZE + 2)
+        y1 = min(self.alto, (cam_y + sh) // TILE_SIZE + 2)
+        frame = int(self.anim_agua) % 3
+        for y in range(y0, y1):
+            fila = self.tiles[y]
+            for x in range(x0, x1):
+                tipo = fila[x]
+                surf = _tile_surface(
+                    tipo, self.bioma, self._var[y][x],
+                    frame if tipo in (AGUA, AGUA_PROF, AGUA_OCEANO,
+                                      LAGO, CASCADA, ANTORCHA,
+                                      MT_SUELO, OBJ_BRILLANTE,
+                                      ARBOL, HIERBA_ALTA, FLORES,
+                                      FLOR_AMARILLA, FLOR_ROJA,
+                                      PALMERA) else 0
+                )
+                pantalla.blit(surf, (x*TILE_SIZE - cam_x, y*TILE_SIZE - cam_y))
+
+    def dibujar_jugador(self, pantalla, cam_x, cam_y, sprites, t=None):
+        px = int(self.pos_x * TILE_SIZE) - cam_x
+        py = int(self.pos_y * TILE_SIZE) - cam_y
+        pygame.draw.ellipse(pantalla, (0, 0, 0, 90), (px + 3, py + 13, 10, 4))
+
+        # Elegir frame según animación
+        try:
+            from sistemas.sprites import SpriteGenerator
+            if self.moviendo:
+                # Animacion mas rapida y fluida: 4 frames
+                # Ciclo: 1 -> 2 -> 3 -> 2 -> 1 ...
+                # Con velocidad ~10 pasos/seg
+                ciclo = int(self.anim_pasos * 8) % 4
+                frames_ciclo = [1, 2, 3, 2]  # izq, idle, der, idle
+                f = frames_ciclo[ciclo]
+            else:
+                f = 0
+            spr = SpriteGenerator.crear_jugador_animado(self.direccion, f, 32)
+        except Exception:
+            spr = (sprites or {}).get(self.direccion)
+
+        if spr is None:
+            pygame.draw.rect(pantalla, (60, 100, 200), (px + 3, py - 2, 10, 14))
+            return
+
+        clave = (self.direccion, id(spr))
+        if clave not in self._escala_jugador:
+            # Sprites v2 son 16x24 base, escalar a 24x36 (mas alto)
+            try:
+                w_base = spr.get_width()
+                h_base = spr.get_height()
+                escala = 32 / max(w_base, 1)
+                self._escala_jugador[clave] = pygame.transform.scale(
+                    spr, (int(w_base * escala * 0.75),
+                          int(h_base * escala * 1.15)))
+            except Exception:
+                self._escala_jugador[clave] = pygame.transform.scale(spr, (24, 36))
+        s = self._escala_jugador[clave]
+
+        bob = 0
+        inclinacion = 0
+        if self.moviendo:
+            # El personaje sube ligeramente en los frames de paso
+            ciclo_bob = int(self.anim_pasos * 8) % 4
+            if ciclo_bob in (1, 3):
+                bob = 1  # Frame de paso: sube 1px
+            else:
+                bob = 0  # Frame idle: en el suelo
+        pantalla.blit(s, (px + TILE_SIZE//2 - s.get_width()//2 + inclinacion,
+                          py + TILE_SIZE - s.get_height() + 4 - bob))
+
+    def dibujar_vida(self, pantalla, cam_x, cam_y):
+        t = self.anim_global
+        bioma = self.bioma
+        sw, sh = pantalla.get_size()
+        w_px = self.ancho * TILE_SIZE
+        h_px = self.alto * TILE_SIZE
+
+        if bioma in ("costa", "valle", "sierra", "paramo", "altiplano", "capital"):
+            for i in range(4):
+                bx = ((t * 24 + i * 240) % (w_px + 240)) - 120 - cam_x
+                by = int(h_px * 0.15) + i * 18 - cam_y
+                fase = int(t * 6 + i) % 2
+                col = (34, 26, 44)
+                if -30 < bx < sw + 30 and -30 < by < sh + 30:
+                    pygame.draw.line(pantalla, col, (bx, by), (bx-5, by-2+fase))
+                    pygame.draw.line(pantalla, col, (bx, by), (bx+5, by-2+fase))
+
+        if bioma in ("valle", "selva"):
+            rnd = random.Random(int(t * 25))
+            for i in range(20):
+                px = (rnd.randint(0, w_px) + int(t*14*(1 if i%2 else -1))) % w_px - cam_x
+                py = (rnd.randint(0, h_px) + int(t*20)) % h_px - cam_y
+                if -4 < px < sw+4 and -4 < py < sh+4:
+                    col = (110,190,80) if i%3 else (240,180,220)
+                    pygame.draw.rect(pantalla, col, (px, py, 2, 2))
+
+        if bioma == "paramo":
+            rnd = random.Random(int(t*15))
+            for i in range(30):
+                px = rnd.randint(0, w_px) - cam_x
+                py = (rnd.randint(0, h_px) + int(t*25)) % h_px - cam_y
+                if -2 < px < sw+2 and -2 < py < sh+2:
+                    pygame.draw.rect(pantalla, (245,250,255), (px, py, 1, 1))
+
+        # Destellos sobre el agua
+        t2 = int(t*3) % 4
+        x0 = max(0, cam_x // TILE_SIZE); y0 = max(0, cam_y // TILE_SIZE)
+        x1 = min(self.ancho, (cam_x + sw) // TILE_SIZE + 1)
+        y1 = min(self.alto, (cam_y + sh) // TILE_SIZE + 1)
+        for ty in range(y0, y1):
+            for tx in range(x0, x1):
+                if self.tiles[ty][tx] in (AGUA, AGUA_PROF, AGUA_OCEANO, LAGO):
+                    if (tx + ty + t2) % 7 == 0:
+                        sx = tx * TILE_SIZE - cam_x + 3
+                        sy = ty * TILE_SIZE - cam_y + 4
+                        pygame.draw.rect(pantalla, (240,250,255), (sx, sy, 2, 1))
+
+
+# ============================================================================
+# === MONKEY-PATCH: GARANTIZAR CAMINOS BORDES ===
+# Se ejecuta al importar el modulo. Añade el metodo a la clase MapaVisual
+# sin importar donde este definida.
+# ============================================================================
+
+def _mp_garantizar_caminos_borde(self):
+    """Garantiza camino fisico desde el centro hasta los bordes con conexion."""
+    try:
+        conex = CONEXIONES.get(self.id, {})
+        if not conex:
+            return
+    except Exception:
+        return
+
+    # Valor de CAMINO
+    camino = 4
+
+    w = self.ancho
+    h = self.alto
+
+    # Rango de salida
+    rango_y = list(range(h // 2 - 4, h // 2 + 5))
+    rango_x = list(range(w // 2 - 4, w // 2 + 5))
+
+    # Tiles validos para reemplazar con camino
+    reemplazables = {0, 1, 10, 11, 12, 23, 24, 25, 26}
+
+    # OESTE
+    if "oeste" in conex:
+        for y in rango_y:
+            if not (0 <= y < h):
+                continue
+            self.tiles[y][0] = camino
+            self.tiles[y][1] = camino
+            for x in range(2, w):
+                t = self.tiles[y][x]
+                if t == camino:
+                    break
+                if t in reemplazables:
+                    self.tiles[y][x] = camino
+                else:
+                    break
+
+    # ESTE
+    if "este" in conex:
+        for y in rango_y:
+            if not (0 <= y < h):
+                continue
+            self.tiles[y][w-1] = camino
+            self.tiles[y][w-2] = camino
+            for x in range(w-3, -1, -1):
+                t = self.tiles[y][x]
+                if t == camino:
+                    break
+                if t in reemplazables:
+                    self.tiles[y][x] = camino
+                else:
+                    break
+
+    # NORTE
+    if "norte" in conex:
+        for x in rango_x:
+            if not (0 <= x < w):
+                continue
+            self.tiles[0][x] = camino
+            self.tiles[1][x] = camino
+            for y in range(2, h):
+                t = self.tiles[y][x]
+                if t == camino:
+                    break
+                if t in reemplazables:
+                    self.tiles[y][x] = camino
+                else:
+                    break
+
+    # SUR
+    if "sur" in conex:
+        for x in rango_x:
+            if not (0 <= x < w):
+                continue
+            self.tiles[h-1][x] = camino
+            self.tiles[h-2][x] = camino
+            for y in range(h-3, -1, -1):
+                t = self.tiles[y][x]
+                if t == camino:
+                    break
+                if t in reemplazables:
+                    self.tiles[y][x] = camino
+                else:
+                    break
+
+    # Actualizar zonas de hierba
+    try:
+        self.zonas_hierba = {(x, y) for y in range(self.alto)
+                              for x in range(self.ancho)
+                              if self.tiles[y][x] in ENCUENTRO}
+    except Exception:
+        pass
+
+
+# Aplicar el monkey-patch
+if hasattr(MapaVisual, "_garantizar_caminos_borde"):
+    # Ya existe, sobreescribir
+    pass
+MapaVisual._garantizar_caminos_borde = _mp_garantizar_caminos_borde
+
+print("OK monkey-patch: MapaVisual._garantizar_caminos_borde instalado")
